@@ -536,12 +536,10 @@ class BackupConfigFragment : PreferenceFragment(),
     }
 
     private suspend fun selectBackupTargets(): Set<String>? {
-        if (BackupTargetConfig.isAllSelected()) {
-            // 全选时不收窄清单：targets=null 走旧「全部打包」路径，
-            // 新增的备份目标不会因为清单漏更新而被静默漏备份。
-            return null
-        }
-        val targets = BackupTargetConfig.selectedTargets()
+        // 全选 → null（旧「全部打包」语义，新增目标自动包含）；
+        // 一个都没勾 → 拒绝并提示，绝不塌缩成"全打包"或"空包"。
+        // 与自动备份共用 BackupTargetConfig.selectedTargetsOrNull()，避免两处各自内联而漂移。
+        val targets = BackupTargetConfig.selectedTargetsOrNull() ?: return null
         if (targets.isEmpty()) {
             appCtx.toastOnUi(R.string.backup_select_none)
             return null

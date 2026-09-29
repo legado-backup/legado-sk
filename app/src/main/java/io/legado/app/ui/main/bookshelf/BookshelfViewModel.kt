@@ -1,7 +1,6 @@
 package io.legado.app.ui.main.bookshelf
 
 import android.app.Application
-import android.net.Uri
 import androidx.lifecycle.MutableLiveData
 import com.google.gson.stream.JsonWriter
 import io.legado.app.R
@@ -17,7 +16,6 @@ import io.legado.app.help.book.BookUpsert
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.coroutine.Coroutine
 import io.legado.app.help.storage.Backup
-import io.legado.app.help.storage.ShelfCleanupRules
 import io.legado.app.help.http.decompressed
 import io.legado.app.help.http.newCallResponseBody
 import io.legado.app.help.http.okHttpClient
@@ -32,7 +30,6 @@ import io.legado.app.utils.fromJsonObject
 import io.legado.app.utils.isAbsUrl
 import io.legado.app.utils.isJsonArray
 import io.legado.app.utils.toastOnUi
-import io.legado.app.utils.compress.ZipUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -122,6 +119,8 @@ class BookshelfViewModel(application: Application) : BaseViewModel(application) 
             AppLog.put("添加网址出错\n${it.localizedMessage}", it, true)
         }.onFinally {
             addBookProgressLiveData.postValue(-1)
+            // 批量加架成功后触发一次（判据幂等，多次调用不会重复备份）
+            notifyShelfMaybeChanged()
         }
     }
 
@@ -294,108 +293,22 @@ class BookshelfViewModel(application: Application) : BaseViewModel(application) 
     private fun lastReadOf(bookUrl: String): Long? =
         appDb.readRecentBookDao.getByBookUrl(bookUrl)?.lastRead
 
-    // ---- 按备份清理本机书籍（bug 2：删不掉、会回流） --------------------------
+    // ---- 书架变动时自动备份 ----------------------------------------------------
 
     /**
-     * 扫描「本机存在、所选备份中没有」的书籍。
+     * 在**书架增删**之后调用，触发「变动即备份」（开关默认关，见 [AppConfig.autoBackupOnShelfChange]）。
      *
-     * 备份恢复是**增量合并**：A 设备删除书籍后备份，B 恢复时其本地未手动删除的书仍留存，
-     * 且 B 再备份会把它们带回 A。此入口让用户用一份备份把本机多出来的书清理掉。
+     * ⚠️ 触发点是**显式白名单**，不做 `bookDao` 层拦截：
+     * 全库有 200+ 处 `bookDao` 写点，绝大多数只是改进度/目录/分组，与"增删"无关；
+     * 在 DAO 层拦截会把它们全部误判为书架变动，更糟的是——`Restore` 也直接写 `bookDao`，
+     * 一旦被拦进来就会在**恢复中途**触发备份（`Backup.backup()` 会删掉恢复正在读取的
+     * `backupPath` 目录）。漏触发只是"少备份一次"，多触发会**破坏数据**，故宁可窄。
      *
-     * ⚠️ 只读扫描，不删任何东西；删除由用户在确认后显式触发。
-     * ⚠️ 基准是**用户显式选择的备份 zip**，不是恢复流程的临时目录（后者会被
-     * `selectRestoreItems` 删掉未选中项，导致「备份里没有」与「用户选择不恢复」混淆）。
+     * 判据本身是幂等的（比对身份键集合），多点调用不会重复触发。
      */
-    fun cleanupByBackup(
-        uri: Uri,
-        onScanned: (candidates: List<Book>, excludedCount: Int) -> Unit
-    ) {
-        execute {
-            val backupBooks = withContext(Dispatchers.IO) {
-                readBooksFromBackupZip(uri)
-            }
-            val localBooks = appDb.bookDao.all
-            val candidates = ShelfCleanupRules.findLocalOnlyBooks(localBooks, backupBooks)
-            val excluded = ShelfCleanupRules.countExcludedLocalBooks(localBooks)
-            candidates to excluded
-        }.onSuccess { (candidates, excluded) ->
-            onScanned(candidates, excluded)
-        }.onError {
-            AppLog.put("按备份清理扫描出错\n${it.localizedMessage}", it)
-            context.toastOnUi(context.getString(R.string.cleanup_by_backup_fail, it.localizedMessage))
-        }
-    }
-
-    /** 从备份 zip 中读出 `bookshelf.json` 的书籍列表；读不到按空处理。 */
-    private fun readBooksFromBackupZip(uri: Uri): List<Book> {
-        val tempDir = File(context.cacheDir, "cleanup_backup")
-        try {
-            FileUtils.delete(tempDir)
-            // 只解压 bookshelf.json：备份 zip 可能含数十 MB 的背景/封面/缓存，
-            // 全量解压既慢又没必要（本入口只需要书籍身份）。
-            zipUtilsUnzip(uri, tempDir)
-            val shelfFile = File(tempDir, "bookshelf.json")
-            if (!shelfFile.exists()) {
-                return emptyList()
-            }
-            return shelfFile.inputStream().use { input ->
-                GSON.fromJsonArray<Book>(input).getOrNull().orEmpty()
-            }
-        } finally {
-            FileUtils.delete(tempDir)
-        }
-    }
-
-    private fun zipUtilsUnzip(uri: Uri, targetDir: File) {
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            ZipUtils.unZipToPath(input, targetDir) { name ->
-                name == "bookshelf.json" || name.endsWith("/bookshelf.json")
-            }
-        }
-    }
-
-    /**
-     * 删除用户勾选的书籍。
-     *
-     * ⚠️ 删除前先把「将被删项」清单落到备份目录：书源/书籍删除不可撤销，
-     * 且这两张表**不在** `RestoreJournal` 的快照范围内（快照从不登记 `legado.db`），
-     * 落一份清单能把「完全不可逆」降级为「可手工找回」（AGENTS.md 拒绝静默数据操作）。
-     *
-     * 走 [Book.delete]（已有）：它负责清阅读引擎状态、本地书资源，并级联删除
-     * chapters / book_illustrations / book_shortcuts / book_collection_items。
-     * 实测该级联**不触及** `book_sources` 与 `caches`，故不影响书源与登录态。
-     */
-    fun deleteBooksByCleanup(
-        books: List<Book>,
-        onDone: (deleted: Int, manifestPath: String?) -> Unit
-    ) {
-        execute {
-            val manifestPath = withContext(Dispatchers.IO) {
-                writeCleanupManifest(books)
-            }
-            books.forEach { book ->
-                appDb.bookDao.getBook(book.bookUrl)?.delete()
-            }
-            books.size to manifestPath
-        }.onSuccess { (deleted, manifestPath) ->
-            onDone(deleted, manifestPath)
-        }.onError {
-            AppLog.put("按备份清理删除出错\n${it.localizedMessage}", it)
-            context.toastOnUi(context.getString(R.string.cleanup_by_backup_fail, it.localizedMessage))
-        }
-    }
-
-    /** 落一份将被删书籍的清单（含可还原书籍本体的字段），返回路径；失败不阻断删除但会记日志。 */
-    private fun writeCleanupManifest(books: List<Book>): String? {
-        return runCatching {
-            val dir = File(Backup.backupPath).parentFile ?: context.filesDir
-            dir.mkdirs()
-            val file = File(dir, "deleted-books-${System.currentTimeMillis()}.json")
-            file.writeText(GSON.toJson(books))
-            file.absolutePath
-        }.onFailure {
-            AppLog.put("导出删除清单失败\n${it.localizedMessage}", it)
-        }.getOrNull()
+    fun notifyShelfMaybeChanged() {
+        Backup.autoBackupOnShelfChangeIfNeeded(context)
     }
 
 }
+
