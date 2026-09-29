@@ -357,7 +357,36 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。下面 10073 是 **main** 的当前产物，**main 下一次 versionCode 从 `10074` 递增**。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 
-- ✅ **10073（`3.26.092401c`）已构建并在平板实机验证（2026-09-23）——main 当前交付（新增「默认备份内容」）**：
+- ✅ **10074（`3.26.092915c`）已构建并安装到平板实机（2026-09-29）——main 当前交付（新增「自动备份」+「恢复按备份覆盖」）**：
+  - 分支 **main**（提交 `64665ebd` / `120bcc16` / `9257bc3c`）。**无 DB 迁移**（版本仍 117）。
+  - ⚠️ **两个新开关默认都是关**（作者确认）：`autoBackupOnShelfChange`、`overwriteShelfOnRestore`。装完不会自动备份、不会删任何书。
+  - **改动一：恢复时按备份覆盖书架**（提交 `64665ebd`）。开启后恢复书架会删掉「本机比备份多」的**在线书**；关闭维持既有增量合并。
+    - 判据抽 `help/book/ShelfIdentity.kt`：**搬** `ShelfCleanupRules.keyOf` 的 **trim** 口径（**不是重写**）。
+      - ⚠️ **判据必须 trim**：备份与本机书名/作者可能只在首尾空白上不同，不归一会把备份里确实存在的书误判为「本机多余」→ **删掉有阅读历史的那条**。`BookMergeRules.identityKeyOf` **刻意不 trim**，两者不可互相替代、不得合并。
+    - ⚠️ **三道守卫缺一即可能删光书架**：① `bookshelf.json` 不存在 ⇒ 拒绝删除（它与 `covers` 绑在同一「书架」可勾选项，用户取消勾选会让该文件不存在 ⇒ 备份在线书集合为空集 ⇒ 全部−空 = 删光）；② 解析失败 ⇒ 拒绝删除（**禁止 `orEmpty()` 降级**）；③ 两侧集合都过滤离线书（本地书 `delete()` 会**物理删文件**）。
+    - ⚠️ **本机集合必须在 merge 之前取快照**（`localKeysBeforeMerge`）：用合并后的集合会让新插入的备份书以其身份键"顶替"本机旧记录而漏判。
+    - ⚠️ **删书放在恢复最末尾、DB 事务之外**：`RestoreJournal` 快照**不含 `legado.db`**，事务内提交后若后续步骤失败会「回滚配置但书已永久删除」，比不删更糟。
+    - 删除前落清单 `filesDir/deleted-books-<ts>.json`（完整 `Book` JSON，可手工找回）。
+    - **回归锁**：`ShelfIdentityTest`（11）+ `RestoreOverwriteGuardTest`（7）。**已双向证伪**：摘掉 exists 守卫 → `overwriteRefusesWhenShelfFileMissing` 失败；摘掉离线书排除 → `overwriteExcludesOfflineBooks` 失败；去掉 trim → `whitespace differences in author do not cause false positive` 失败。
+  - **改动二：书架变动时自动备份**（提交 `120bcc16`）。在线书**增删**时自动备份一次（去抖 8 秒）。
+    - ⚠️ **换源不算变动**（作者决定）：判据是**在线书身份键集合**，换源 `bookUrl` 变而身份键不变 ⇒ 天然不触发；阅读进度、离线书增减同样不触发。
+    - ⚠️ **刻意绕开 `autoBack` 的「一天一次」`shouldBackup()` 闸门**，也**不复用 `autoBack`**（`backup()` 开头无条件推高 `lastBackup`，会反过来压制既有周期）。
+    - ⚠️ **恢复进行中一律跳过**（`Restore.isRestoring`）：恢复正把备份解压到 `backupPath`，而 `backup()` 开头会 `FileUtils.delete(backupPath)` ⇒ 中途备份会**删掉正在被读取的备份目录**。⚠️ `Backup.mutex` 与 `Restore.mutex` 是**两把独立私有锁**，恢复期间 `Backup` 侧零阻塞，**不能靠锁互斥，必须显式避让**。
+    - ⚠️ **触发点是显式白名单，不得做 `bookDao` 层拦截**：全库 200+ 处写点且 `Restore` 也直接写 `bookDao`；**漏触发只是少备一次，多触发会破坏数据**。
+    - ⚠️ `lastShelfKeys` 记在 **`LocalConfig`（独立 `local` pref）**，不得放进 `AppConfig` —— 那会被全量写进 `config.xml` 并在恢复时带回本机，把判据基线"校准"成另一台设备的状态。**记账必须在备份成功之后**。
+    - 未配置备份路径 ⇒ 跳过并记日志，不弹 UI。
+    - **回归锁**：`AutoBackupOnShelfChangeGuardTest`（7）。**已双向证伪**：摘掉恢复期挂起 → `autoBackupSuspendedWhileRestoring` 失败；把记账提前到备份前 → `shelfKeysRecordedOnlyAfterBackupSucceeds` 失败。
+  - **改动三：移除「按备份清理本机书籍」入口**（提交 `9257bc3c`）。菜单项 + 四个 UI 方法 + ViewModel 扫描/删除/清单 + `ShelfCleanupRules.kt` + 14 条字符串 + `ShelfCleanupEntryTest`。**判据语义未丢**（已迁入 `ShelfIdentity`）；`deleted-books` 清单机制保留（移到 `Restore` 侧）。
+  - **验证**：全量单测 **236 项 / 10 失败**（10 项＝既有已知失败 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增失败**）。
+  - **实机（平板 HA1KAPWG，`io.legado.app.sk2` 10073 → 10074 覆盖安装保数据）**：
+    - ⚠️ **该平板上只装了共存版 `io.legado.app.sk2`**（正式版 `io.legado.app.c` 未装），故本次只覆盖升级 sk2（作者确认）。
+    - `firstInstallTime` 保持 `2026-09-21 13:08:56`（= 原地升级、数据保留）；`logcat -b crash` **0 条**；启动 `monkey` 后进程存活（pid 14138）、无 `FATAL EXCEPTION`。
+    - ⚠️ **界面/功能验证由作者完成**（作者要求：AI 不做模拟器测试，只装实机）。**未做任何改动数据的操作**。
+  - **产物**（同版本号、同签名、仅包名不同）：`release/legado_sk_3.26.092915c_10074_arm64-v8a.apk`（36,172,863 字节，`io.legado.app.c`，sha256 `EDA85BEC…`）＋ `release/legado_sk_3.26.092915c_10074_arm64-v8a_（共存版）.apk`（36,172,644 字节，`io.legado.app.sk2`，sha256 `BC68F827…`）。
+    - aapt 均为 `10074` / `3.26.092915c` / 阅读SK / arm64-v8a / locales `'zh'`；`debuggable` 无输出；`classes*.dex` 均 **8** 个；apksigner exit 0（证书 SHA-256 `79fef578…`）。`release/legado-sk-arm64-v8a.apk`（固定名）已更新为 10074 正式版。
+  - **未发布 Release。下一次交付 versionCode 从 `10075` 递增。**
+
+- ✅ **10073（`3.26.092401c`）已构建并在平板实机验证（2026-09-23）——历史交付（新增「默认备份内容」）**：
   - 分支 **main**（提交 `fe182e31`，基于 `0f4093e5`）。**无 DB 迁移**。
   - **需求**：备份每次都强制弹框且硬编码全选 → 想去掉主题/阅读排版（**背景图/字体/主题包才是体积大头**）只能每次手动取消。对齐 Legado_Max 的「备份选择器」，改为**一次设定长期生效**。
   - **改动一：新增 `BackupTargetConfig`**（`filesDir/backupTarget.json`）持久化备份范围。
