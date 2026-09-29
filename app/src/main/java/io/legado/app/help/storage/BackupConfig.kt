@@ -9,6 +9,8 @@ import io.legado.app.model.BookCover
 import io.legado.app.utils.FileUtils
 import io.legado.app.utils.GSON
 import io.legado.app.utils.fromJsonObject
+import io.legado.app.utils.getPrefBoolean
+import io.legado.app.utils.putPrefBoolean
 import splitties.init.appCtx
 
 /**
@@ -28,6 +30,13 @@ object BackupConfig {
     private const val themeConfigKey = "themeConfig"
     private const val coverConfigKey = "coverConfig"
     private const val localBookKey = "localBook"
+
+    /**
+     * 「恢复时按备份覆盖书架」的 pref key。
+     *
+     * ⚠️ 一旦发布即存量设备的持久化键，**只能新增、不能改名或复用**。
+     */
+    const val overwriteShelfKey = "overwriteShelfOnRestore"
 
     //配置忽略key
     val ignoreKeys = arrayOf(
@@ -156,6 +165,20 @@ object BackupConfig {
         get() = ignoreConfig[PreferKey.threadCount] == true
     val ignoreLocalBook: Boolean
         get() = ignoreConfig[localBookKey] == true
+
+    /**
+     * 「恢复时按备份覆盖书架」。
+     *
+     * 开启后，恢复书架时会把**本机比备份多出来的在线书删除**（默认关闭 = 维持既有的增量合并）。
+     *
+     * ⚠️ **默认必须是关**：这改变了所有用户的恢复语义，而删书**不可回滚**
+     * （`RestoreJournal` 的快照不含 `legado.db`，属既有继承缺陷）。默认开等于把
+     * 「不可逆删除」强加给只想做增量恢复的用户。
+     * ⚠️ 与 [BackupTargetConfig]（备份打包范围）是**两套独立语义**，互不干扰。
+     */
+    var overwriteShelfOnRestore: Boolean
+        get() = appCtx.getPrefBoolean(overwriteShelfKey)
+        set(value) = appCtx.putPrefBoolean(overwriteShelfKey, value)
 
     fun saveIgnoreConfig() {
         val json = GSON.toJson(ignoreConfig)
@@ -295,6 +318,21 @@ object BackupTargetConfig {
      */
     fun selectedTargets(): Set<String> =
         BackupItems.all.filter { isSelected(it.key) }.flatMapTo(hashSetOf()) { it.targets }
+
+    /**
+     * 打包用 targets：**全选时返回 null**，否则返回选中集合。
+     *
+     * ⚠️ 全选时必须下发 `null`（旧「全部打包」语义），不能下发显式清单：
+     * [Backup] 内部只按 targets 过滤清单，清单漏掉某个目标（例如日后新增）
+     * 就会被**静默漏备份**；全选不下发才能让新增目标自动包含。
+     *
+     * ⚠️ 返回**空集**代表「一个都没勾」，调用方**必须据此拒绝备份**并提示，
+     * 绝不能塌缩成「全打包」或「打个空包」。
+     *
+     * 手动备份与自动备份**共用本入口**，避免两处各自内联同一判断而漂移。
+     */
+    fun selectedTargetsOrNull(): Set<String>? =
+        if (isAllSelected()) null else selectedTargets()
 
     fun save() {
         FileUtils.createFileIfNotExist(configPath).writeText(GSON.toJson(selections))

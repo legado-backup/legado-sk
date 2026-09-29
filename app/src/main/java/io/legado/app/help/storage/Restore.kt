@@ -34,6 +34,7 @@ import io.legado.app.data.entities.TxtTocRule
 import io.legado.app.help.DirectLinkUpload
 import io.legado.app.help.LauncherIconHelp
 import io.legado.app.help.book.BookMergeRules
+import io.legado.app.help.book.ShelfIdentity
 import io.legado.app.help.book.isLocal
 import io.legado.app.help.book.upType
 import io.legado.app.help.config.LocalConfig
@@ -78,6 +79,27 @@ object Restore {
 
     private val mutex = Mutex()
 
+    /**
+     * 「按备份覆盖」用的**本机在线书身份键快照**，在 DB 段合并之前取（见 [overwriteShelfIfNeeded]）。
+     *
+     * 必须是实例字段：取值点在 `restoreDbData` 之前，消费点在 `restore()` 末尾，
+     * 中间隔着整个恢复流程。关闭开关时为 null（不取快照、也不删除）。
+     */
+    private var localKeysBeforeMerge: Set<ShelfIdentity.Key>? = null
+
+    /**
+     * 「恢复流程进行中」标志，供自动备份侧避让。
+     *
+     * ⚠️ **必须有这个闸门**：恢复把备份解压到 `Backup.backupPath`，而 `Backup.backup()` 开头
+     * 会 `FileUtils.delete(backupPath)` 再重建 —— 若自动备份在恢复中途触发，会把**正在被读取**
+     * 的备份目录删掉，后续 `File(path, ...)` 全读到空/半截内容。
+     * `Backup.mutex` 与 `Restore.mutex` 是两把**独立**的私有锁，恢复期间 `Backup` 侧零阻塞，
+     * 所以不能靠锁互斥，必须显式避让。
+     */
+    @Volatile
+    var isRestoring: Boolean = false
+        private set
+
     private const val TAG = "Restore"
 
     internal val backgroundAssetDirNames = arrayOf(
@@ -117,19 +139,28 @@ object Restore {
 
     suspend fun restoreLocked(path: String) {
         mutex.withLock {
-            RestoreJournal.begin(RestoreJournal.buildSnapshotTargets(path))
+            // 全程置位「恢复中」，让自动备份侧避让（见 [isRestoring]）。
+            // 用 try/finally 保证异常路径也会复位，否则一次失败的恢复会让自动备份永久停摆。
+            isRestoring = true
             try {
-                restore(path)
-                RestoreJournal.markPendingValidation()
-            } catch (e: Throwable) {
-                RestoreJournal.rollbackNow("恢复过程异常: ${e.localizedMessage}")
-                throw e
+                RestoreJournal.begin(RestoreJournal.buildSnapshotTargets(path))
+                try {
+                    restore(path)
+                    RestoreJournal.markPendingValidation()
+                } catch (e: Throwable) {
+                    RestoreJournal.rollbackNow("恢复过程异常: ${e.localizedMessage}")
+                    throw e
+                }
+            } finally {
+                isRestoring = false
             }
         }
     }
 
     private suspend fun restore(path: String) {
         val aes = BackupAES()
+        // 每次恢复都重置快照：避免上一次恢复的残留被本次误用（本方法可能在同一进程内被多次调用）。
+        localKeysBeforeMerge = null
         restoreDbData(path, aes)   // M1: DB 段（bookshelf→servers.json）原子恢复
         File(path, DirectLinkUpload.ruleFileName).takeIf {
             it.exists()
@@ -258,6 +289,13 @@ object Restore {
         if (agentBackup.exists()) {
             io.legado.app.help.agent.AgentBackup.restore(agentBackup)
         }
+        // ⚠️ 「按备份覆盖」的删书必须放在**最后一步、且在 DB 事务之外**：
+        // `RestoreJournal` 的快照目标**不含 `legado.db`**（既有继承缺陷），若删书在
+        // `restoreDbData` 的事务内提交，之后任一后续步骤失败触发 `rollbackNow()` 时，
+        // 只会还原配置文件而书已被永久删除 —— 「看起来恢复失败，书其实已经没了」，
+        // 比不删更糟。放到末尾可保证所有可能失败的步骤都已执行完毕。
+        overwriteShelfIfNeeded(path)
+
         postEvent(EventBus.UP_CONFIG, arrayListOf(1, 2, 5))
         appCtx.toastOnUi(R.string.restore_success)
         hintDuplicatesAfterRestore()
@@ -272,6 +310,14 @@ object Restore {
         // M1: DB 段（bookshelf→servers.json）整体事务化——任一步失败则整库回滚，杜绝半恢复态。
         // 用 Room withTransaction(suspend)：keyboardAssistsDao.deleteAll() 是 suspend DAO，
         // 原生 beginTransaction 无法让它在同一事务线程执行；withTransaction 在事务上下文中协调 suspend 与同步 DAO。
+        // 「按备份覆盖」的本机快照**必须在合并之前**取：
+        // 合并会把备份书并入本机记录、并可能插入新行，之后取会把新行算进来，
+        // 导致本该删掉的本机旧记录被新行的身份键"顶替"而漏判（见 ShelfIdentity 说明）。
+        localKeysBeforeMerge = if (BackupConfig.overwriteShelfOnRestore) {
+            ShelfIdentity.keysOf(appDb.bookDao.all)
+        } else {
+            null
+        }
         appDb.withTransaction {
             // 备份书 URL → 最终落库的本机书 URL。配图段据此重映射并过滤，保证外键恒有父行。
             val restoredBookUrls = restoreShelfBooks(path)
@@ -358,6 +404,86 @@ object Restore {
         val groups = BookMergeRules.duplicateGroups(appDb.bookDao.all)
         if (groups.isEmpty()) return
         appCtx.toastOnUi(R.string.restore_duplicates_hint)
+    }
+
+    /**
+     * 「恢复时按备份覆盖书架」：把本机比备份多出来的**在线书**删掉。
+     *
+     * 默认关闭（[BackupConfig.overwriteShelfOnRestore]）；关闭时本方法直接返回，
+     * 恢复维持既有的**增量合并**语义（只加不删）。
+     *
+     * ## 三道守卫（缺一即可能删光书架）
+     *
+     * ⚠️ **① `bookshelf.json` 不存在 ⇒ 拒绝删除。**
+     * 恢复前的「选择恢复项目」会把**未勾选**项目对应的文件从解压目录里删掉
+     * （`BackupConfigFragment.deleteRestoreTarget`），而 `bookshelf.json` 与 `covers`
+     * 绑在同一个「书架」可勾选项上。用户一旦取消勾选「书架」，该文件就不存在；
+     * 此时若把「备份在线书集合」当成空集，`全部 − 空 = 全部` ⇒ **删光在线书架**。
+     *
+     * ⚠️ **② 解析失败 ⇒ 拒绝删除。**
+     * 与 ① 同理：读不出来不等于「备份里没有」。这是本仓库已用血写下的教训
+     * （见 `companion/发布版更新记录.md`「按备份清理的解析契约」）。
+     *
+     * ⚠️ **③ 两侧集合都用 [ShelfIdentity] 过滤离线书**，故离线书恒不在删除集合内。
+     * 尤其是本地书 —— `Book.delete()` 对 `isLocal` 会**物理删文件**。
+     *
+     * ## 为什么能删够（而不只是删一部分）
+     *
+     * 本机集合用的是**合并之前**的快照（[localKeysBeforeMerge]，由调用方在 DB 段之前取）。
+     * 若用合并之后的集合，新插入的备份书会以其身份键"顶替"本机旧记录，
+     * 使本该被删掉的记录漏判。
+     */
+    private suspend fun overwriteShelfIfNeeded(path: String) {
+        if (!BackupConfig.overwriteShelfOnRestore) {
+            return
+        }
+        val localKeys = localKeysBeforeMerge ?: return
+        // 守卫①：文件不存在（用户未勾选「书架」恢复，或备份本身不含书架）
+        val shelfFile = File(path, "bookshelf.json")
+        if (!shelfFile.exists()) {
+            AppLog.put("按备份覆盖已跳过：备份中没有 bookshelf.json，未删除任何书籍")
+            return
+        }
+        // 守卫②：解析失败一律拒绝删除（fileToBookList 读不出来时返回 null）
+        val backupBooks = fileToBookList(path)
+        if (backupBooks == null) {
+            AppLog.put("按备份覆盖已跳过：bookshelf.json 解析失败，未删除任何书籍")
+            return
+        }
+        val backupKeys = ShelfIdentity.keysOf(backupBooks)
+        val toDelete = appDb.bookDao.all.filter { book ->
+            // 守卫③：离线书一律排除（keyOf 为 null），绝不进入删除集合
+            val key = ShelfIdentity.keyOf(book) ?: return@filter false
+            key in localKeys && key !in backupKeys
+        }
+        if (toDelete.isEmpty()) {
+            return
+        }
+        // 删除不可撤销（RestoreJournal 不含 legado.db），先把将被删项落盘：
+        // 把「完全不可逆」降级为「可手工找回」。
+        writeOverwriteManifest(toDelete)
+        toDelete.forEach { book ->
+            appDb.bookDao.getBook(book.bookUrl)?.delete()
+        }
+        AppLog.put("按备份覆盖：已删除 ${toDelete.size} 本备份中不存在的在线书籍")
+        appCtx.toastOnUi(appCtx.getString(R.string.restore_overwrite_done, toDelete.size))
+    }
+
+    /**
+     * 落一份将被删书籍的清单（完整 `Book` JSON，含 bookUrl/origin/进度等可重建字段），
+     * 返回路径；失败不阻断删除但会记日志。
+     *
+     * ⚠️ 落点 `filesDir/` **本身**、不在 `filesDir/backup/` 内，
+     * 故 `Backup.zipFiles`/`FileUtils.delete(backupPath)` 删不到它。
+     */
+    private fun writeOverwriteManifest(books: List<Book>): String? {
+        return runCatching {
+            val file = File(appCtx.filesDir, "deleted-books-${System.currentTimeMillis()}.json")
+            file.writeText(GSON.toJson(books))
+            file.absolutePath
+        }.onFailure {
+            AppLog.put("导出按备份覆盖删除清单失败\n${it.localizedMessage}", it)
+        }.getOrNull()
     }
 
     /**

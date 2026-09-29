@@ -83,12 +83,26 @@ class BackupTargetConfigTest {
      */
     @Test
     fun allSelectedKeepsNullTargetsSemantics() {
-        val block = fragmentSource.substringAfter("private suspend fun selectBackupTargets")
-            .substringBefore("private fun buildBackupItems")
-        val gate = block.substringBefore("return targets")
+        // 全选 → null 的语义已收敛到 BackupTargetConfig.selectedTargetsOrNull()（唯一入口），
+        // 手动备份与自动备份共用它，避免两处各自内联同一判断而漂移。
+        val entry = configSource.substringAfter("fun selectedTargetsOrNull")
+            .substringBefore("fun save()")
+        assertTrue("未定位到 selectedTargetsOrNull", entry.isNotBlank())
         assertTrue(
-            "全选必须提前 return null，保留旧「全部打包」语义",
-            gate.contains("isAllSelected()") && gate.contains("return null")
+            "全选必须返回 null，保留旧「全部打包」语义",
+            entry.contains("isAllSelected()") && entry.contains("null")
+        )
+        // 手动备份入口必须走共享入口（不得再内联 isAllSelected）
+        val manual = fragmentSource.substringAfter("private suspend fun selectBackupTargets")
+            .substringBefore("private fun buildBackupItems")
+        assertTrue(
+            "手动备份必须复用共享入口 selectedTargetsOrNull()",
+            manual.contains("selectedTargetsOrNull()")
+        )
+        // 空选择必须拒绝，不得塌缩成全打包或空包
+        assertTrue(
+            "空选择必须提示并中止",
+            manual.contains("backup_select_none") && manual.contains("return null")
         )
     }
 
