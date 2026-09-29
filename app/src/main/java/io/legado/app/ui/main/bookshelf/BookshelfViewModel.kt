@@ -15,7 +15,6 @@ import io.legado.app.help.book.BookMergeRules
 import io.legado.app.help.book.BookUpsert
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.coroutine.Coroutine
-import io.legado.app.help.storage.Backup
 import io.legado.app.help.http.decompressed
 import io.legado.app.help.http.newCallResponseBody
 import io.legado.app.help.http.okHttpClient
@@ -119,8 +118,6 @@ class BookshelfViewModel(application: Application) : BaseViewModel(application) 
             AppLog.put("添加网址出错\n${it.localizedMessage}", it, true)
         }.onFinally {
             addBookProgressLiveData.postValue(-1)
-            // 批量加架成功后触发一次（判据幂等，多次调用不会重复备份）
-            notifyShelfMaybeChanged()
         }
     }
 
@@ -292,23 +289,6 @@ class BookshelfViewModel(application: Application) : BaseViewModel(application) 
 
     private fun lastReadOf(bookUrl: String): Long? =
         appDb.readRecentBookDao.getByBookUrl(bookUrl)?.lastRead
-
-    // ---- 书架变动时自动备份 ----------------------------------------------------
-
-    /**
-     * 在**书架增删**之后调用，触发「变动即备份」（开关默认关，见 [AppConfig.autoBackupOnShelfChange]）。
-     *
-     * ⚠️ 触发点是**显式白名单**，不做 `bookDao` 层拦截：
-     * 全库有 200+ 处 `bookDao` 写点，绝大多数只是改进度/目录/分组，与"增删"无关；
-     * 在 DAO 层拦截会把它们全部误判为书架变动，更糟的是——`Restore` 也直接写 `bookDao`，
-     * 一旦被拦进来就会在**恢复中途**触发备份（`Backup.backup()` 会删掉恢复正在读取的
-     * `backupPath` 目录）。漏触发只是"少备份一次"，多触发会**破坏数据**，故宁可窄。
-     *
-     * 判据本身是幂等的（比对身份键集合），多点调用不会重复触发。
-     */
-    fun notifyShelfMaybeChanged() {
-        Backup.autoBackupOnShelfChangeIfNeeded(context)
-    }
 
 }
 

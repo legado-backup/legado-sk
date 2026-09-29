@@ -1182,6 +1182,7 @@
     <string name="restore_overwrite_done">已按备份删除 %1$d 本多余书籍</string>
     <string name="auto_backup_on_shelf_change_t">书架变动时自动备份</string>
     <string name="auto_backup_on_shelf_change_s">书架中的在线书籍有增加或减少时自动备份一次（换源、阅读进度变化、离线书均不计入）</string>
+    <string name="auto_backup_shelf_done">已自动备份书架</string>
     <string name="backup_select_none">未选择任何备份内容，请在「默认备份内容」中勾选</string>
     <string name="backup_pack_failed">备份打包失败</string>
     <string name="read_config">阅读界面设置</string>

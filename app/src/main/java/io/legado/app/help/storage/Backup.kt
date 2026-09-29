@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
+import io.legado.app.R
 import io.legado.app.constant.AppLog
 import io.legado.app.constant.PreferKey
 import io.legado.app.data.appDb
@@ -33,6 +34,7 @@ import io.legado.app.utils.isContentScheme
 import io.legado.app.utils.normalizeFileName
 import io.legado.app.utils.openOutputStream
 import io.legado.app.utils.outputStream
+import io.legado.app.utils.toastOnUiBrief
 import io.legado.app.utils.writeToOutputStream
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.currentCoroutineContext
@@ -276,18 +278,26 @@ object Backup {
                 return@async
             }
             mutex.withLock {
-                val backupPath = AppConfig.backupPath
-                if (backupPath.isNullOrBlank()) {
-                    // 未配置备份路径：跳过并记日志，不弹 UI（自动行为不该打断用户）。
-                    AppLog.put("书架变动自动备份已跳过：未配置备份路径")
+                // ⚠️ 这里**不能**用 `backupPath.isNullOrBlank()` 当"没配置备份"的判据：
+                // `AppConfig.backupPath` 只是**本地/SAF 目录**，与 WebDAV 完全无关；
+                // `backup()` 内部会无条件 `AppWebDav.backUpWebDav()`，WebDAV 是独立配置项。
+                // 手动备份在 `backupPath` 为空时是**弹目录选择器**（见 BackupConfigFragment.backup），
+                // 不是"跳过"。自动备份没有 UI 可弹，故为空时**只跳过本地落盘**、仍走 WebDAV。
+                // 曾经写成 `isNullOrBlank() → return`，导致"只配了 WebDAV"的用户
+                // （最常见的用法）自动备份**永远静默不执行**。
+                val localPath = AppConfig.backupPath?.takeIf { it.isNotBlank() }
+                if (localPath == null && !AppWebDav.isOk) {
+                    // 本地与 WebDAV 都没配 ⇒ 确实无处可写，跳过并记日志（不弹 UI）。
+                    AppLog.put("书架变动自动备份已跳过：未配置本地备份目录且未配置 WebDAV")
                     return@withLock
                 }
                 val verified = ShelfIdentity.keysOf(appDb.bookDao.all)
-                backup(context, backupPath, targets = BackupTargetConfig.selectedTargetsOrNull())
+                backup(context, localPath, targets = BackupTargetConfig.selectedTargetsOrNull())
                 // ⚠️ 记账必须放在**备份成功之后**：放在开头的话，备份中途被取消/进程被杀
                 // 会留下「标记已更新但备份没做成」，该次变动此后永不补备份。
                 LocalConfig.lastShelfKeys = encodeKeys(verified)
                 AppLog.put("书架变动自动备份完成：${verified.size} 本在线书")
+                context.toastOnUiBrief(R.string.auto_backup_shelf_done)
             }
         }.onError {
             AppLog.put("书架变动自动备份失败\n${it.localizedMessage}", it)

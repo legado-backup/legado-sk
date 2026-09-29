@@ -1436,6 +1436,7 @@
     <string name="restore_overwrite_done">Deleted %1$d extra book(s) per backup</string>
     <string name="auto_backup_on_shelf_change_t">Auto backup when shelf changes</string>
     <string name="auto_backup_on_shelf_change_s">Backs up once when online books are added to or removed from the shelf (source changes, reading progress and offline books are not counted)</string>
+    <string name="auto_backup_shelf_done">Shelf backed up automatically</string>
     <string name="backup_select_none">No backup contents selected; choose some in "Default backup contents"</string>
     <string name="backup_pack_failed">Backup packaging failed</string>
     <string name="read_config">Reading interface settings</string>

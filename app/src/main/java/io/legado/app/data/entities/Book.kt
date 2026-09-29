@@ -22,12 +22,14 @@ import io.legado.app.help.book.isLocal
 import io.legado.app.help.book.simulatedTotalChapterNum
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.ReadBookConfig
+import io.legado.app.help.storage.Backup
 import io.legado.app.model.ReadBook
 import io.legado.app.model.localBook.LocalBook
 import io.legado.app.utils.GSON
 import io.legado.app.utils.fromJsonObject
 import kotlinx.parcelize.IgnoredOnParcel
 import kotlinx.parcelize.Parcelize
+import splitties.init.appCtx
 import java.nio.charset.Charset
 import java.time.LocalDate
 import kotlin.math.max
@@ -494,6 +496,13 @@ data class Book(
             appDb.bookDao.update(this)
         } else {
             appDb.bookDao.insert(this)
+            // 新书入库 = 书架**增加**（仅在线书会被判据计入，见 ShelfIdentity）。
+            // ⚠️ 接在 `Book.save()` 而不是各 UI 入口：加架有 4+ 条独立路径
+            // （加网址 / 详情页加架 / 本地导入 / 远程导入），逐条接必然漏。
+            // ⚠️ 也不会把恢复流程卷进来：`Restore` 全程走 `bookDao.insert/update` 原始调用，
+            // **不经过** `save()`，故无需额外排除。
+            // 判据幂等（比对身份键集合）+ 8 秒去抖，progress/toc 等高频更新不会重复备份。
+            Backup.autoBackupOnShelfChangeIfNeeded(appCtx)
         }
     }
 
@@ -506,6 +515,9 @@ data class Book(
             LocalBook.deletePersistentBookResources(this)
         }
         appDb.bookDao.delete(this)
+        // 删除 = 书架**减少**。与 `Book.save()` 对称，覆盖不经 `BookShortcutHelp.delete`
+        // 的删除路径（书籍详情页删除、API 控制器删除）。离线书删除不会被判据计入。
+        Backup.autoBackupOnShelfChangeIfNeeded(appCtx)
     }
 
     @Suppress("ConstPropertyName")

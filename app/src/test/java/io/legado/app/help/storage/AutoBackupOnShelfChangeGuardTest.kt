@@ -82,19 +82,19 @@ class AutoBackupOnShelfChangeGuardTest {
     }
 
     /**
-     * ⚠️ 未配置备份路径时必须跳过并记日志，不得抛错、不得弹 UI。
+     * ⚠️ 本地与 WebDAV **都没配**时必须跳过并记日志，不得抛错、不得弹 UI。
      */
     @Test
-    fun skipsWhenBackupPathNotConfigured() {
+    fun skipsOnlyWhenNoTargetAtAll() {
         val body = autoBackupBlock()
 
         assertTrue(
-            "必须检查备份路径是否为空",
-            body.contains("backupPath.isNullOrBlank()")
+            "必须在无任何可用目标时记日志（拒绝静默）",
+            body.contains("AppLog.put")
         )
         assertTrue(
-            "跳过时必须记日志（拒绝静默）",
-            body.contains("AppLog.put")
+            "跳过时不得弹提示（自动行为不该打断用户）",
+            body.substringBefore("backup(context,").let { !it.contains("toastOnUiBrief(") }
         )
     }
 
@@ -106,7 +106,7 @@ class AutoBackupOnShelfChangeGuardTest {
     @Test
     fun shelfKeysRecordedOnlyAfterBackupSucceeds() {
         val body = autoBackupBlock()
-        val backupCallAt = body.indexOf("backup(context, backupPath")
+        val backupCallAt = body.indexOf("backup(context, localPath")
         val recordAt = body.indexOf("LocalConfig.lastShelfKeys =")
 
         assertTrue("未找到 backup 调用点", backupCallAt >= 0)
@@ -164,27 +164,75 @@ class AutoBackupOnShelfChangeGuardTest {
     }
 
     /**
-     * ⚠️ 触发点必须是**显式白名单**，不得挂在 DAO 层。
-     * 全库 200+ 处 `bookDao` 写点绝大多数只改进度/目录，且 `Restore` 也直接写 `bookDao`
-     * —— 在 DAO 层拦截会把恢复流程自身卷进来（见 autoBackupSuspendedWhileRestoring）。
+     * ⚠️ 触发点必须是**显式声明的领域方法**，不得挂在 `bookDao` 层。
+     *
+     * 全库 200+ 处 `bookDao` 写点绝大多数只改进度/目录/分组，且 `Restore` 也**直接**写
+     * `bookDao` —— 在 DAO 层拦截会把恢复流程自身卷进来（见 autoBackupSuspendedWhileRestoring）。
+     *
+     * 采用的接缝是 `Book.save()` / `Book.delete()` / `BookShortcutHelp.delete()`
+     * （领域方法，恢复流程**不经过**它们），而不是 DAO 或 UI 入口。
      */
     @Test
-    fun triggerIsExplicitNotDaoWide() {
-        // 触发方法应存在且被显式调用方引用
-        val vm = moduleSource("src/main/java/io/legado/app/ui/main/bookshelf/BookshelfViewModel.kt")
+    fun triggerIsOnDomainMethodsNotDao() {
+        val book = moduleSource("src/main/java/io/legado/app/data/entities/Book.kt")
+        val shortcut = moduleSource("src/main/java/io/legado/app/help/book/BookShortcutHelp.kt")
 
+        // 加入书架的唯一收口
         assertTrue(
-            "BookshelfViewModel 应提供显式触发入口",
-            vm.contains("fun notifyShelfMaybeChanged()")
+            "Book.save() 必须触发书架变动检查（覆盖全部加架路径）",
+            book.contains("Backup.autoBackupOnShelfChangeIfNeeded(appCtx)")
         )
+        // 删除漏斗
         assertTrue(
-            "触发入口应委托 Backup.autoBackupOnShelfChangeIfNeeded",
-            vm.contains("Backup.autoBackupOnShelfChangeIfNeeded(context)")
+            "BookShortcutHelp.delete() 必须触发书架变动检查（覆盖全部删除路径）",
+            shortcut.contains("Backup.autoBackupOnShelfChangeIfNeeded(appCtx)")
         )
-        // Backup 自身不得读取 bookDao 之外的隐式写路径钩子（即不注册 DAO 观察者）
+        // Backup 自身不得注册 DAO 观察者
         assertTrue(
             "Backup 侧不得注册 DAO 层拦截（无 InvalidationTracker 观察者）",
             !backupSource().contains("InvalidationTracker")
         )
+    }
+
+    /**
+     * ⚠️ **不得**把「备份路径为空」当作「没配置备份」而直接跳过。
+     *
+     * `AppConfig.backupPath` 只是**本地/SAF 目录**，与 WebDAV 完全无关
+     * （WebDAV 由 `backup()` 内部的 `AppWebDav.backUpWebDav()` 独立完成）。
+     * 早期实现写成 `backupPath.isNullOrBlank() → return`，导致「只配了 WebDAV」的用户
+     * （最常见的用法）自动备份**永远静默不执行** —— 这正是实机报上来的现象。
+     */
+    @Test
+    fun doesNotTreatMissingLocalPathAsUnconfigured() {
+        val body = autoBackupBlock()
+        val webDavCheckAt = body.indexOf("AppWebDav.isOk")
+        assertTrue("必须把 WebDAV 纳入「是否有处可写」的判据", webDavCheckAt >= 0)
+
+        // ⚠️ 关键不变式：**在决定"哪里有处可写"的那一小段里**，本地路径为空时
+        // 不得提前 return —— 那会让只配 WebDAV 的用户永不自动备份（实机报来的现象）。
+        // 观测窗口必须从本段起算：方法开头的 `Restore.isRestoring` 等意图级守卫
+        // 本来就在更前面且合法地含 return，不能把它们算进来。
+        val blockStart = body.lastIndexOf("val localPath", webDavCheckAt)
+        assertTrue("应存在 localPath 取值的语句", blockStart >= 0)
+        val decisionBlock = body.substring(blockStart, webDavCheckAt)
+        assertTrue(
+            "本地路径为空时不得在 WebDAV 判据之前提前退出（当前决策段：$decisionBlock）",
+            !decisionBlock.contains("return")
+        )
+    }
+
+    /** ⚠️ 备份成功后必须有**极短**提示（作者要求 0.5 秒一闪而过）。 */
+    @Test
+    fun showsBriefToastAfterSuccessfulAutoBackup() {
+        val body = autoBackupBlock()
+
+        assertTrue(
+            "备份成功后必须提示",
+            body.contains("toastOnUiBrief(")
+        )
+        // 提示必须晚于记账/备份，不能在建任务时就弹（否则失败也提示成功）
+        val toastAt = body.indexOf("toastOnUiBrief(")
+        val backupAt = body.indexOf("backup(context,")
+        assertTrue("提示必须晚于备份调用", backupAt in 0..<toastAt)
     }
 }

@@ -8,9 +8,11 @@ import io.legado.app.data.entities.BookShortcut
 import io.legado.app.data.entities.BookShortcutWithBook
 import io.legado.app.model.SourceCallBack
 import io.legado.app.model.localBook.LocalBook
+import io.legado.app.help.storage.Backup
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import splitties.init.appCtx
 
 /**
  * 快捷方式只是书架上的虚拟 Book：shortcutId 只用于区分入口，bookUrl 始终指向本体。
@@ -130,6 +132,11 @@ object BookShortcutHelp {
                 SourceCallBack.callBackBook(SourceCallBack.DEL_BOOK_SHELF, source, body)
             }
         }
+        // 书架**减少**在线书后触发一次「书架变动自动备份」。
+        // ⚠️ 这是所有删除入口（书架/合集/管理页）的**唯一漏斗**，所以接在这里
+        // 才能一次覆盖全部删除路径；接在各 Fragment 里会漏掉若干入口。
+        // 判据是幂等的身份键集合比对，离线书删除不会引起变动、不会误触发。
+        Backup.autoBackupOnShelfChangeIfNeeded(appCtx)
     }
 
     private fun BookShortcutWithBook.toShelfBook(body: Book): Book {

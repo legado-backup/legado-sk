@@ -16,6 +16,40 @@ private var toast: Toast? = null
 
 private var toastLegacy: Toast? = null
 
+/** 极短提示的自动取消句柄（见 [toastOnUiBrief]）。 */
+private var briefToastTimeout: Runnable? = null
+
+/**
+ * 「一闪而过」的提示（默认 0.5 秒）。
+ *
+ * 为什么不能只靠 `Toast.setDuration`：`Toast` 只接受 `LENGTH_SHORT`(0) /
+ * `LENGTH_LONG`(1) 两个常量，**任何其它值都不是"毫秒"**——系统会当作未知常量
+ * 落回 SHORT（约 2 秒，且受无障碍「提示显示时长」影响）。所以"0.5 秒淡出"
+ * 必须在到点后主动 `cancel()`。
+ *
+ * 复用与应用内其它提示**同一个**主题化 Toast（[toastOnUi]），因此外观、
+ * 主题色与「禁用所有提示」开关的行为完全一致；这里只额外接管消失时机。
+ */
+fun Context.toastOnUiBrief(message: Int, durationMs: Long = BRIEF_TOAST_MS) {
+    toastOnUiBrief(getString(message), durationMs)
+}
+
+fun Context.toastOnUiBrief(message: CharSequence?, durationMs: Long = BRIEF_TOAST_MS) {
+    toastOnUi(message, Toast.LENGTH_SHORT)
+    // 到点主动取消，得到远短于 LENGTH_SHORT 的一闪效果。
+    briefToastTimeout?.let { briefHandler.removeCallbacks(it) }
+    val timeout = Runnable {
+        toast?.cancel()
+        briefToastTimeout = null
+    }
+    briefToastTimeout = timeout
+    briefHandler.postDelayed(timeout, durationMs)
+}
+
+private val briefHandler by lazy { buildMainHandler() }
+
+private const val BRIEF_TOAST_MS = 500L
+
 private fun cancelToastsWhenDisabled(): Boolean {
     if (!AppConfig.disableAllToast) return false
     toast?.cancel()
