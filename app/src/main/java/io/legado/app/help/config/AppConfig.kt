@@ -1682,6 +1682,17 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
 
     val onlyLatestBackup get() = appCtx.getPrefBoolean(PreferKey.onlyLatestBackup, true)
 
+    /**
+     * 书架增删时自动备份。
+     *
+     * ⚠️ 默认**关**：自动备份会联网上传 WebDAV 并写盘，属侵入性行为，
+     * 不能替用户默认打开（不想要的人得先去关掉，方向就反了）。
+     * ⚠️ 与 `pref_config_backup.xml` 的 `android:defaultValue` 必须一致
+     * （AGENTS.md §4「设置默认值」）。
+     */
+    val autoBackupOnShelfChange get() =
+        appCtx.getPrefBoolean(PreferKey.autoBackupOnShelfChange, false)
+
     val autoCheckNewBackup get() = appCtx.getPrefBoolean(PreferKey.autoCheckNewBackup, true)
 
     val defaultHomePage get() = appCtx.getPrefString(PreferKey.defaultHomePage, "bookshelf")

@@ -107,6 +107,13 @@
             android:title="@string/restore_ignore"
             app:iconSpaceReserved="false" />
 
+        <io.legado.app.lib.prefs.SwitchPreference
+            android:defaultValue="false"
+            android:key="overwriteShelfOnRestore"
+            android:summary="@string/overwrite_shelf_on_restore_s"
+            android:title="@string/overwrite_shelf_on_restore_t"
+            app:iconSpaceReserved="false" />
+
         <io.legado.app.lib.prefs.Preference
             android:key="import_old"
             android:summary="@string/import_old_summary"
@@ -125,6 +132,15 @@
             android:key="autoCheckNewBackup"
             android:summary="@string/auto_check_new_backup_s"
             android:title="@string/auto_check_new_backup_t"
+            app:allowDividerAbove="false"
+            app:allowDividerBelow="false"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.SwitchPreference
+            android:defaultValue="false"
+            android:key="autoBackupOnShelfChange"
+            android:summary="@string/auto_backup_on_shelf_change_s"
+            android:title="@string/auto_backup_on_shelf_change_t"
             app:allowDividerAbove="false"
             app:allowDividerBelow="false"
             app:iconSpaceReserved="false" />

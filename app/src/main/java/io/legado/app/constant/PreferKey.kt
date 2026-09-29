@@ -400,6 +400,12 @@ object PreferKey {
     const val showWaitUpCount = "showWaitUpCount"
     const val clearWebViewData = "clearWebViewData"
     const val onlyLatestBackup = "onlyLatestBackup"
+
+    /**
+     * 书架增删时自动备份。
+     * ⚠️ 默认**关**（见 `pref_config_backup.xml` 与本 key 的读取点默认值必须一致）。
+     */
+    const val autoBackupOnShelfChange = "autoBackupOnShelfChange"
     const val brightnessVwPos = "brightnessVwPos"
     const val shrinkDatabase = "shrinkDatabase"
     const val batchChangeSourceDelay = "batchChangeSourceDelay"
