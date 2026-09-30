@@ -388,9 +388,20 @@ uiautomator2 / ADB
     - ⚠️ **旧断言对本缺陷完全不可见**（测试盲区）：它只检查 `Book.kt` 里**有没有**那行字符串，**压根不看 `BookUpsert.kt`** ⇒ 加书全漏触发而测试全绿。现断言落在各**函数体**上（`shelfWriteFunnelsAllTriggerBackup`），并把 `triggerIsOnDomainMethodsNotDao` 从「整个文件含字符串」收紧到「`delete()` 函数体含字符串」（否则 save 有、delete 没有也算绿）。
     - **四项双向证伪**（各自注入 → 对应测试失败 → 全部还原）：摘 savePlain 触发 / 摘 merge 触发 / 恢复侧改回会触发的删除 / 摘拿锁复查。
     - ⚠️ 其中「拿锁复查」的断言**首版是无效断言**（写「块内出现过 `lastShelfKeys`」，**记账行也命中**，实测摘掉复查块后**仍全绿**）。已改为锚定复查语句本身（比较 freshly-read 的 `verified`，且 `return` 早于 `backup`）。**这类"断言了但没真断言"必须靠注入证伪才能发现。**
-  - **验证**：全量单测 **241 项 / 10 失败**（10 项＝既有已知失败 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增失败**；新增 3 项全绿）。
+  - **验证**：全量单测 **242 项 / 10 失败**（10 项＝既有已知失败 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增失败**；新增 4 项全绿）。
   - **三份独立只读审核交叉验证**（AGENTS §1.5 实践；报告在 gitignored `test-records/autobackup-add-not-triggering/`）：证伪代理确认根因成立并**纠正主代理 3 处过度断言**；穷举代理列出完整漏触发清单；方案代理**否决了另 3 个方案**（含「App 层观察 `bookDao`」——会让**每次翻页存进度**都跑全表查询 + 集合比对，是真正的高频风险）。
-  - **下一次交付 versionCode 从 `10077` 递增。**
+  - **补可观测性缺口**（`88ab2bba`）：`autoBackupOnShelfChangeIfNeeded` 的「身份键集合未变化 ⇒ return」原本**完全静默**，导致实机上「加了书却没备份」**无法从日志区分**三种情形（① 触发点没接上＝缺陷；② 集合确实没变＝设计幂等；③ 正在去抖/上传）。排查时只能靠读源码推断。现补日志，**四个「决定不备份」出口全部可查**：开关关闭 / 恢复中 / 未配任何目标 / 集合未变。
+    - 回归锁 `everySkipBranchLogsItsReason`（12→**13** 项），已双向证伪（摘掉该日志 → FAILED）。
+    - 实机诊断命令：`adb -s <serial> logcat -d | findstr "书架变动自动备份"`。
+  - **实机验证（两台，`io.legado.app.sk2` 10075 → 10076 覆盖安装保数据）**：
+    - 平板 `HA1KAPWG`：`firstInstallTime` 保持 `2026-09-21 13:08:56`、`ceDataInode` 保持 `3702639`；pid 存活、`logcat -b crash` 0 条。**作者实测「搜索页加书架」已正常备份**（10075 时不备份）。
+    - 手机 `72a2b362`：`firstInstallTime` 保持 `2026-09-21 16:12:52`、`ceDataInode` 保持 `820249`；`logcat -b crash` 0 条。
+    - ⚠️ **手机首装被 `INSTALL_FAILED_USER_RESTRICTED` 拒绝**（HyperOS「USB 安装」开关），请作者手动开启后成功。**再次印证：adb 侧绕不过去，直接请作者开开关，不要反复重试。**
+  - **⚠️ 排查教训（第二轮实机反馈）**：作者报「搜索页加书架仍不备份」，但那条路径（搜索网格 → 详情页 → 加书架 → `BookUpsert`）**代码上已被本版覆盖**；真因是**手机当时仍是 10075**。
+    - **教训：实机反馈先核实「被测设备装的哪个 versionCode」，再读代码。** 本次差点为一条其实已修好的路径去改代码。
+    - 另一条要记住的正常行为：若该书在进详情页时**已落库**（点「开始阅读」/「目录」会先落库），再点「加入书架」时书架集合**没变** ⇒ 按幂等设计**不该备份**（现已有日志可区分，见上）。
+  - **产物**（重编后）：正式版 36,178,830 字节（sha256 `7a30b44d…`）＋ 共存版 36,178,814 字节（sha256 `6994d46c…`）；均 `10076` / `3.26.093012c` / 阅读SK / arm64-v8a / locales `'zh'` / 8 dex / 无 `debuggable` / apksigner exit 0（`79fef578…`）。
+  - **未发布 Release。下一次交付 versionCode 从 `10077` 递增。**
 
 - ✅ **10075（`3.26.092916c`）——历史交付，✅ 已发布 Pre-release `v3.26.092916-10075`（2026-09-29）**（10074+10075 合并交付：新增「恢复时按备份覆盖书架」+「书架变动时自动备份」）：
   - 分支 **main**（提交 `64665ebd` / `120bcc16` / `9257bc3c` / `2cb89035`）。**无 DB 迁移**（版本仍 117）。
