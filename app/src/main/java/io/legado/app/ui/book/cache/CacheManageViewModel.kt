@@ -35,6 +35,7 @@ import io.legado.app.help.cache.CacheTaskStatus
 import io.legado.app.help.cache.MediaCacheTaskState
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.review.ReviewSnapshotStore
+import io.legado.app.help.storage.Backup
 import io.legado.app.help.tts.TtsCacheStore
 import io.legado.app.utils.FileUtils
 import io.legado.app.utils.GSON
@@ -393,6 +394,10 @@ class CacheManageViewModel(application: Application) : BaseViewModel(application
                 sameNameBook != null -> appDb.bookDao.replace(sameNameBook, cacheBook)
                 else -> appDb.bookDao.insert(cacheBook)
             }
+            // 「缓存恢复到书架」是**直接写 bookDao**（不经 `Book.save()`，也不用 `BookUpsert`
+            // 的身份收敛——这里已自行按 sameUrl/sameName 查过重），故需显式补一次书架变动检查，
+            // 否则把缓存书恢复到书架不会触发自动备份。
+            Backup.autoBackupOnShelfChangeIfNeeded(appCtx)
             val chapters = CacheManifestHelper.toChapters(manifest, cacheBook.bookUrl)
             if (chapters.isNotEmpty()) {
                 appDb.bookChapterDao.delByBook(cacheBook.bookUrl)

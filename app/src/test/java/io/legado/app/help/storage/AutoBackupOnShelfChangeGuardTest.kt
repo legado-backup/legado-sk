@@ -169,28 +169,153 @@ class AutoBackupOnShelfChangeGuardTest {
      * 全库 200+ 处 `bookDao` 写点绝大多数只改进度/目录/分组，且 `Restore` 也**直接**写
      * `bookDao` —— 在 DAO 层拦截会把恢复流程自身卷进来（见 autoBackupSuspendedWhileRestoring）。
      *
-     * 采用的接缝是 `Book.save()` / `Book.delete()` / `BookShortcutHelp.delete()`
-     * （领域方法，恢复流程**不经过**它们），而不是 DAO 或 UI 入口。
+     * 采用的接缝是 `Book.save()` / `Book.delete()` / `BookShortcutHelp.delete()` /
+     * `BookUpsert.savePlain()` / `BookUpsert.merge()`，而不是 DAO 或 UI 入口。
+     *
+     * ⚠️ **10076 教训**：10075 的版本只断言了 `Book.kt` 里**存在**那行字符串，
+     * 却漏了 `BookUpsert` 这条收口，于是「加入书架」主力路径全部漏触发而测试全绿。
+     * 现在加架侧的断言改由 [shelfWriteFunnelsAllTriggerBackup] 覆盖 `BookUpsert`。
      */
     @Test
     fun triggerIsOnDomainMethodsNotDao() {
-        val book = moduleSource("src/main/java/io/legado/app/data/entities/Book.kt")
-        val shortcut = moduleSource("src/main/java/io/legado/app/help/book/BookShortcutHelp.kt")
-
-        // 加入书架的唯一收口
-        assertTrue(
-            "Book.save() 必须触发书架变动检查（覆盖全部加架路径）",
-            book.contains("Backup.autoBackupOnShelfChangeIfNeeded(appCtx)")
+        val book = executableOnly(moduleSource("src/main/java/io/legado/app/data/entities/Book.kt"))
+        val shortcut = executableOnly(
+            moduleSource("src/main/java/io/legado/app/help/book/BookShortcutHelp.kt")
         )
-        // 删除漏斗
+        val call = "Backup.autoBackupOnShelfChangeIfNeeded(appCtx)"
+
+        // ⚠️ 断言必须落在**函数体**上：整个文件里"有没有字符串"无法区分 save/delete，
+        // 10075 的写法正是因此让缺陷漏网（`save()` 有、`delete()` 没有也算绿）。
+        val deleteBody = book.substringAfter("fun delete()").substringBefore("deleteWithoutShelfBackup")
+        assertTrue("未能定位 Book.delete() 函数体", deleteBody.isNotBlank())
         assertTrue(
-            "BookShortcutHelp.delete() 必须触发书架变动检查（覆盖全部删除路径）",
-            shortcut.contains("Backup.autoBackupOnShelfChangeIfNeeded(appCtx)")
+            "Book.delete() 必须触发书架变动检查（覆盖删除路径）",
+            deleteBody.contains(call)
+        )
+
+        val shortcutDeleteBody = shortcut
+            .substringAfter("fun delete(")
+            .substringBefore("fun update(")
+        assertTrue("未能定位 BookShortcutHelp.delete() 函数体", shortcutDeleteBody.isNotBlank())
+        assertTrue(
+            "BookShortcutHelp.delete() 必须触发书架变动检查（覆盖删除路径）",
+            shortcutDeleteBody.contains(call)
         )
         // Backup 自身不得注册 DAO 观察者
         assertTrue(
             "Backup 侧不得注册 DAO 层拦截（无 InvalidationTracker 观察者）",
             !backupSource().contains("InvalidationTracker")
+        )
+    }
+
+    /**
+     * ⚠️ **加架侧的每个写库出口都必须触发**（10076 新增，本缺陷的回归锁）。
+     *
+     * `BookUpsert` 是「按身份入库」的收口，主流加架路径（搜索页 / 详情页「加入书架」）
+     * 全走它，而它**直接写 `bookDao`、不经过 `Book.save()`**。10075 只接了 `Book.save()`，
+     * 导致加书静默不备份（实机报上来的现象）。
+     *
+     * ⚠️ 断言必须落在**两个写库函数的函数体**上，而不是整个文件里"有没有字符串"——
+     * 后者正是 10075 漏掉本缺陷的原因：只要文件里任意一处有，测试就绿。
+     * `savePlain` 有 insert/update/删 stray 三个出口，`merge` 有 update/删 src 等出口，
+     * 故两个函数都必须各自带触发行。
+     */
+    @Test
+    fun shelfWriteFunnelsAllTriggerBackup() {
+        val upsert = executableOnly(
+            moduleSource("src/main/java/io/legado/app/help/book/BookUpsert.kt")
+        )
+        val call = "Backup.autoBackupOnShelfChangeIfNeeded(appCtx)"
+
+        // savePlain：加架主路径（`:182` 的裸 insert 就在其中）
+        val savePlainBody = upsert
+            .substringAfter("private fun savePlain(")
+            .substringBefore("private fun moveShortcuts(")
+        assertTrue("未能定位 savePlain 函数体", savePlainBody.isNotBlank())
+        assertTrue(
+            "BookUpsert.savePlain() 必须触发书架变动检查（否则新书入库不备份）",
+            savePlainBody.contains(call)
+        )
+
+        // merge：换源并入既有记录时会删掉 src，是真实的书架减少
+        val mergeBody = upsert
+            .substringAfter("internal fun merge(")
+            .substringBefore("private fun savePlain(")
+        assertTrue("未能定位 merge 函数体", mergeBody.isNotBlank())
+        assertTrue(
+            "BookUpsert.merge() 必须触发书架变动检查（合并会删 src）",
+            mergeBody.contains(call)
+        )
+
+        // ⚠️ 触发必须在事务**之后**：事务内失败会回滚，提前触发会备份出一个并未发生的新书架。
+        val savePlainTxEnd = savePlainBody.indexOf("appDb.runInTransaction {")
+        if (savePlainTxEnd >= 0) {
+            val callAt = savePlainBody.indexOf(call, savePlainTxEnd)
+            val bodyEnd = savePlainBody.lastIndexOf("return target")
+            assertTrue("savePlain 的触发应位于事务块之后、return 之前", callAt in savePlainTxEnd..<bodyEnd)
+        }
+    }
+
+    /**
+     * ⚠️ **恢复流程删书必须走结构性隔离**，不得依赖 `Restore.isRestoring` 这一个运行时布尔。
+     *
+     * `Restore.overwriteShelfIfNeeded` 会调 `Book.delete()` —— 那是会触发备份的方法。
+     * 10075 只靠 `Backup` 侧读 `Restore.isRestoring` 挡住，属隐式约定；
+     * 一旦有人改动 `restoreLocked` 的 `isRestoring` 作用域，恢复就会在解压中途触发备份，
+     * 把**正在被读取**的备份目录删掉。10076 起改为显式调用不含触发的删除。
+     */
+    @Test
+    fun restoreDeletesWithoutTriggeringBackup() {
+        val restore = executableOnly(moduleSource("src/main/java/io/legado/app/help/storage/Restore.kt"))
+
+        assertTrue(
+            "Restore 删书必须走 deleteWithoutShelfBackup()（结构性隔离）",
+            restore.contains("deleteWithoutShelfBackup()")
+        )
+        assertTrue(
+            "Restore 不得直接调用会触发备份的 Book.delete()",
+            !Regex("\\?\\.delete\\(\\)").containsMatchIn(restore)
+        )
+
+        val book = executableOnly(moduleSource("src/main/java/io/legado/app/data/entities/Book.kt"))
+        assertTrue(
+            "Book 必须提供 deleteWithoutShelfBackup()（供恢复流程使用）",
+            book.contains("fun deleteWithoutShelfBackup()")
+        )
+    }
+
+    /**
+     * ⚠️ **拿锁后必须复查 `lastShelfKeys`**，否则并发触发会重复备份一次。
+     *
+     * `pendingShelfChangeJob` 是普通 var（无 volatile / 无锁），并发调用时后写覆盖前者，
+     * 两个 job 都可能排队进入 `withLock`；先到的备份完并记账后，后到的若不复查就会
+     * **再备份一遍同样的书架**（不损坏数据，但白白多传一次）。
+     */
+    @Test
+    fun rechecksShelfKeysAfterAcquiringLock() {
+        val body = autoBackupBlock()
+        val lockAt = body.indexOf("withLock {")
+        assertTrue("未能定位 withLock 块", lockAt >= 0)
+        val afterLock = body.substring(lockAt)
+
+        // ⚠️ 断言不能用「块内出现过 lastShelfKeys」——记账那行 `LocalConfig.lastShelfKeys = …`
+        // 也会命中，等于没断言（实测：摘掉复查块后该写法仍然全绿）。
+        // 必须锚定**复查语句本身**：把 freshly-read 的 `verified` 与已记账值比较，并在
+        // `backup(` 之前 return —— 这样才真的挡住「后到的 job 重复备份一遍」。
+        val recheckAt = afterLock.indexOf("if (encodeKeys(verified) == LocalConfig.lastShelfKeys)")
+        assertTrue(
+            "withLock 内必须把**本次重新读取的** verified 与 lastShelfKeys 比较（防并发重复备份）",
+            recheckAt >= 0
+        )
+        val backupAt = afterLock.indexOf("backup(context,")
+        assertTrue("未找到 backup 调用点", backupAt >= 0)
+        assertTrue(
+            "复查必须发生在 backup 调用**之前**（否则拦不住重复备份）",
+            recheckAt < backupAt
+        )
+        assertTrue(
+            "复查命中时必须提前 return（不得落到 backup）",
+            afterLock.substring(recheckAt, backupAt).contains("return@withLock")
         )
     }
 

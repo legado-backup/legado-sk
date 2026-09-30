@@ -5,7 +5,9 @@ import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookChapter
 import io.legado.app.data.entities.ReadRecentBook
 import io.legado.app.help.ai.AiChapterPurifyService
+import io.legado.app.help.storage.Backup
 import io.legado.app.model.ReadBook
+import splitties.init.appCtx
 
 /**
  * 书籍身份收敛的**写入收口**：所有「按身份入库」的路径都必须走这里。
@@ -151,6 +153,9 @@ object BookUpsert {
                 ReadBook.resetData(merged)
             }
         }
+        // 合并会**删掉 src**（若其身份与 keep 不同，书架就是净减少），故与 savePlain 对称接一次。
+        // ⚠️ 必须接在事务**之后**：事务内失败会回滚，提前触发会备份出一个并未发生的新书架。
+        Backup.autoBackupOnShelfChangeIfNeeded(appCtx)
         return merged
     }
 
@@ -193,6 +198,11 @@ object BookUpsert {
                 appDb.bookDao.delete(stray)
             }
         }
+        // ⚠️ 接在**函数末尾**（事务之后），不是只接上面的 insert 分支：
+        // 本函数有 insert / update / 删 stray 三个出口，且 `stray` 的删除在分支**之外**，
+        // 只接 insert 会漏掉「换源并入旧记录」这条真实的书架减少。
+        // ⚠️ 必须在事务之后：事务内失败会回滚，提前触发会备份出一个并未发生的新书架。
+        Backup.autoBackupOnShelfChangeIfNeeded(appCtx)
         return target
     }
 

@@ -18,7 +18,10 @@ class VideoPlayerViewModel(application: Application) : BaseViewModel(application
     fun removeFromBookshelf(success: (() -> Unit)?) {
         execute {
             VideoPlay.book?.let {
-                appDb.bookDao.delete(it)
+                // ⚠️ 必须走 `Book.delete()` 而不是裸 `bookDao.delete(it)`：
+                // 后者绕过删除侧的书架变动收口（自动备份不会触发），
+                // 且遗漏了 `Book.delete()` 对本地书的资源清理与 `ReadBook.book` 解绑。
+                it.delete()
             }
         }.onSuccess {
             success?.invoke()

@@ -101,6 +101,9 @@ object ImportOldData {
     private fun importOldBookshelf(json: String): Int {
         val books = fromOldBooks(json)
         appDb.bookDao.insert(*books.toTypedArray())
+        // 本路径直写 `bookDao`（不经 `Book.save()` 也不经 `BookUpsert`），
+        // 是一次真实的书架批量新增，需显式补一次书架变动检查。
+        Backup.autoBackupOnShelfChangeIfNeeded(appCtx)
         return books.size
     }
 

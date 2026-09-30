@@ -497,16 +497,40 @@ data class Book(
         } else {
             appDb.bookDao.insert(this)
             // 新书入库 = 书架**增加**（仅在线书会被判据计入，见 ShelfIdentity）。
-            // ⚠️ 接在 `Book.save()` 而不是各 UI 入口：加架有 4+ 条独立路径
-            // （加网址 / 详情页加架 / 本地导入 / 远程导入），逐条接必然漏。
-            // ⚠️ 也不会把恢复流程卷进来：`Restore` 全程走 `bookDao.insert/update` 原始调用，
-            // **不经过** `save()`，故无需额外排除。
+            // ⚠️ 本处只覆盖**走 `save()` 的**那部分加架路径（如「添加网址」、本地/远程导入）。
+            // ⚠️ **`save()` 不是加架的唯一收口**：主流的「加入书架」（搜索页 / 详情页按钮）
+            // 走 `BookUpsert.upsertByIdentity()`，它直接写 `bookDao`、**不经过本方法**——
+            // 那条路径的触发接在 `BookUpsert.savePlain()` / `merge()` 末尾。
+            // 10075 只接了本处，导致这些路径**全部漏触发**（加书不备份），10076 修。
             // 判据幂等（比对身份键集合）+ 8 秒去抖，progress/toc 等高频更新不会重复备份。
             Backup.autoBackupOnShelfChangeIfNeeded(appCtx)
         }
     }
 
     fun delete() {
+        deleteInternal()
+        // 删除 = 书架**减少**。与 `Book.save()` 对称，覆盖不经 `BookShortcutHelp.delete`
+        // 的删除路径（书籍详情页删除、API 控制器删除、视频播放器移出书架、按备份覆盖）。
+        // 离线书删除不会被判据计入。
+        Backup.autoBackupOnShelfChangeIfNeeded(appCtx)
+    }
+
+    /**
+     * 删除但**不触发**书架变动检查（自动备份）。
+     *
+     * ⚠️ 只给**恢复流程**用：恢复期间删书是恢复自身的一部分，不该反过来触发一次备份
+     * ——`backup()` 开头会 `FileUtils.delete(backupPath)`，会把恢复**正在读取**的备份目录删掉。
+     *
+     * 10075 起该保护只靠 `Backup` 侧读 `Restore.isRestoring` 这一个运行时布尔，
+     * 而 `Book.delete()` 会被恢复路径直接调用（见 `Restore.overwriteShelfIfNeeded`），
+     * 使「恢复不触发备份」变成一条**容易被静默改坏**的隐式约定。
+     * 本方法把该隔离变成**结构性**的：恢复侧显式调用它，不再依赖任何全局状态。
+     */
+    internal fun deleteWithoutShelfBackup() {
+        deleteInternal()
+    }
+
+    private fun deleteInternal() {
         if (ReadBook.book?.bookUrl == bookUrl) {
             ReadBook.book = null
         }
@@ -515,9 +539,6 @@ data class Book(
             LocalBook.deletePersistentBookResources(this)
         }
         appDb.bookDao.delete(this)
-        // 删除 = 书架**减少**。与 `Book.save()` 对称，覆盖不经 `BookShortcutHelp.delete`
-        // 的删除路径（书籍详情页删除、API 控制器删除）。离线书删除不会被判据计入。
-        Backup.autoBackupOnShelfChangeIfNeeded(appCtx)
     }
 
     @Suppress("ConstPropertyName")
