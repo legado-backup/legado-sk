@@ -267,6 +267,12 @@ object Backup {
         }
         val currentKeys = encodeKeys(ShelfIdentity.keysOf(appDb.bookDao.all))
         if (currentKeys == LocalConfig.lastShelfKeys) {
+            // ⚠️ 这里**必须记日志**：这是"触发了但没备份"的唯一静默出口。
+            // 没有它时，用户在实机上看到"加了书却没有备份"无法区分三种情形：
+            // ① 触发点没接上（代码缺陷）；② 触发了但身份键集合没变（设计上的幂等）；
+            // ③ 备份正在去抖/上传中（还没到云端）。
+            // 10076 排查时就因为这条静默 return 而无法从日志定性，只能靠读代码推断。
+            AppLog.put("书架变动自动备份已跳过：书架身份键集合未变化（无在线书增删）")
             return
         }
         pendingShelfChangeJob?.cancel()

@@ -346,6 +346,43 @@ class AutoBackupOnShelfChangeGuardTest {
         )
     }
 
+    /**
+     * ⚠️ **"触发了但没备份"的出口不许静默**（10076 补日志的可观测性回归锁）。
+     *
+     * `autoBackupOnShelfChangeIfNeeded` 有若干"决定不备份"的分支。其中
+     * 「书架身份键集合未变化」曾在 10076 排查时**完全静默**，导致实机上
+     * 「加了书却没备份」无法从日志区分三种情形：① 触发点没接上（代码缺陷）；
+     * ② 触发了但集合没变（设计上的幂等）；③ 备份在去抖/上传中（还没到云端）。
+     * 只能靠读源码推断，不满足「有问题直接暴露」。
+     */
+    @Test
+    fun everySkipBranchLogsItsReason() {
+        val body = autoBackupBlock()
+
+        // 三个 skip 出口都必须有日志：开关关 / 恢复中 / 集合未变 / 无可用目标
+        val skipReasons = listOf(
+            "未变化" to "书架身份键集合未变化",
+            "恢复流程进行中" to "恢复流程进行中",
+        )
+        skipReasons.forEach { (needle, why) ->
+            assertTrue("缺少「$why」的跳过日志", body.contains(needle))
+        }
+        // 无可用目标那条在 localPath 判据之后，已有日志；这里断言它没被删
+        assertTrue(
+            "缺少「未配置任何备份目标」的跳过日志",
+            body.contains("未配置本地备份目录且未配置 WebDAV")
+        )
+
+        // ⚠️ 关键不变式：集合未变那条**必须**带日志，不能是裸 return。
+        val keysCheckAt = body.indexOf("currentKeys == LocalConfig.lastShelfKeys")
+        assertTrue("必须存在身份键集合比对", keysCheckAt >= 0)
+        val branchBody = body.substring(keysCheckAt).substringBefore("pendingShelfChangeJob?.cancel()")
+        assertTrue(
+            "身份键集合未变时不得静默 return（必须 AppLog.put 说明原因）",
+            branchBody.contains("AppLog.put")
+        )
+    }
+
     /** ⚠️ 备份成功后必须有**极短**提示（作者要求 0.5 秒一闪而过）。 */
     @Test
     fun showsBriefToastAfterSuccessfulAutoBackup() {
