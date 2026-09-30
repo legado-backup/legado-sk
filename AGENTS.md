@@ -365,7 +365,34 @@ uiautomator2 / ADB
 
 ---
 
-- ✅ **10075（`3.26.092916c`）——main 当前交付，✅ 已发布 Pre-release `v3.26.092916-10075`（2026-09-29）**（10074+10075 合并交付：新增「恢复时按备份覆盖书架」+「书架变动时自动备份」，并修复后者的自动备份从不触发）：
+- ✅ **10076（`3.26.093001c`）——main 当前交付，待发布（2026-09-30）**（修复「加入书籍」不触发自动备份 + 补齐 3 个漏点 + 2 项加固）：
+  - 分支 **main**（提交 `33ab2fb2` 主修 / `3e17ab5f` 加固）。**无 DB 迁移**（版本仍 117）。
+  - **根因**：**`Book.save()` 不是加架的唯一收口**。全项目有**两个**写库收口，10075 只接了其一：
+    | 收口 | 本质 | 10075 是否接 |
+    |---|---|---|
+    | `Book.save()`（`data/entities/Book.kt`） | 按 `bookUrl` 覆盖写 | ✅ 接（只覆盖少部分路径） |
+    | **`BookUpsert.savePlain()` + `merge()`** | **按身份收敛写入**（10054 引入） | ❌ **没接** |
+  - ⚠️ `BookUpsert` **直调 `bookDao.insert/update/delete`，从不调 `Book.save()`**（新书入库在 `savePlain` 的 insert），而**主流「加入书架」全走它**：搜索页 `HomepageViewModel.onAddToShelf`、详情页 `BookInfoViewModel.addToBookshelf`。
+    - **实机现象**：删书能备份、加书不能。**删除侧正常纯属巧合**（删除收口恰好是被接上的那两个方法）。
+    - 时序自洽：`BookUpsert` 于 `9655ee5e`(10054) 引入，**早于**触发点接线 `2cb89035`(10075)。
+    - ⚠️ **作者原猜测「因为加书不在书架页面所以没判断到」不成立**——触发点从未接在 UI 入口上。
+  - **修复**：`savePlain()` 与 `merge()` 的**事务之后**各接一次触发。
+    - ⚠️ 必须接在 `savePlain` **函数末尾**而非 insert 分支：该函数有 insert / update / 删 stray 三个出口，**stray 删除在分支之外**。
+    - ⚠️ 两处都必须在**事务之后**：事务内失败会回滚，提前触发会备份出一个并未发生的新书架。
+  - **补齐 3 个独立漏点**（审核穷举全库 `bookDao` 写点后查出）：`VideoPlayerViewModel.removeFromBookshelf`（视频页「移出书架」→ 改走 `Book.delete()`）、`CacheManageViewModel.restoreCacheToBookshelf`（缓存恢复到书架）、`ImportOldData.importOldBookshelf`（导入旧版数据）。
+    - 经核实**按设计不该触发、故未接**：本地 TXT/EPUB 导入（`BookType.local`）、`deleteNotShelfBook`（`notShelf`）、`AiBookshelfTool`（**本版无加书入口**）。三者都被 `ShelfIdentity` 排除。
+  - **加固一（结构性隔离）**：`Restore.overwriteShelfIfNeeded` 原本调**会触发**的 `book.delete()`，只靠 `Restore.isRestoring` 一个**运行时布尔**挡住 ⇒ 隔离其实是隐式约定，一旦有人改动其作用域，恢复就会在解压中途触发备份，**把正在读取的备份目录删掉**。新增 `Book.deleteWithoutShelfBackup()`，恢复侧显式调用；`isRestoring` 保留作第二道防线。
+    - ⚠️ **10075 的注释是错的**：`Book.kt` 与守卫测试都声称「恢复流程不经过 save/delete」，**只提了 `save()`、漏了 `delete()`**，与 `Restore.kt:466` 直接矛盾。已修正。
+  - **加固二**：拿锁后复查 `lastShelfKeys`。`pendingShelfChangeJob` 是普通 var（无 volatile/无锁），并发时两个 job 都可能进 `withLock` ⇒ 先到的记完账，后到的**重复备份一次**。
+  - **回归锁 9→12 项**：`AutoBackupOnShelfChangeGuardTest`。
+    - ⚠️ **旧断言对本缺陷完全不可见**（测试盲区）：它只检查 `Book.kt` 里**有没有**那行字符串，**压根不看 `BookUpsert.kt`** ⇒ 加书全漏触发而测试全绿。现断言落在各**函数体**上（`shelfWriteFunnelsAllTriggerBackup`），并把 `triggerIsOnDomainMethodsNotDao` 从「整个文件含字符串」收紧到「`delete()` 函数体含字符串」（否则 save 有、delete 没有也算绿）。
+    - **四项双向证伪**（各自注入 → 对应测试失败 → 全部还原）：摘 savePlain 触发 / 摘 merge 触发 / 恢复侧改回会触发的删除 / 摘拿锁复查。
+    - ⚠️ 其中「拿锁复查」的断言**首版是无效断言**（写「块内出现过 `lastShelfKeys`」，**记账行也命中**，实测摘掉复查块后**仍全绿**）。已改为锚定复查语句本身（比较 freshly-read 的 `verified`，且 `return` 早于 `backup`）。**这类"断言了但没真断言"必须靠注入证伪才能发现。**
+  - **验证**：全量单测 **241 项 / 10 失败**（10 项＝既有已知失败 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增失败**；新增 3 项全绿）。
+  - **三份独立只读审核交叉验证**（AGENTS §1.5 实践；报告在 gitignored `test-records/autobackup-add-not-triggering/`）：证伪代理确认根因成立并**纠正主代理 3 处过度断言**；穷举代理列出完整漏触发清单；方案代理**否决了另 3 个方案**（含「App 层观察 `bookDao`」——会让**每次翻页存进度**都跑全表查询 + 集合比对，是真正的高频风险）。
+  - **下一次交付 versionCode 从 `10077` 递增。**
+
+- ✅ **10075（`3.26.092916c`）——历史交付，✅ 已发布 Pre-release `v3.26.092916-10075`（2026-09-29）**（10074+10075 合并交付：新增「恢复时按备份覆盖书架」+「书架变动时自动备份」）：
   - 分支 **main**（提交 `64665ebd` / `120bcc16` / `9257bc3c` / `2cb89035`）。**无 DB 迁移**（版本仍 117）。
   - ⚠️ **10074 从未单独发布 Release**（其自动备份实际不可用），已并入本版。**两个新开关默认都是关**（作者确认）：`autoBackupOnShelfChange`、`overwriteShelfOnRestore`。
   - **改动一：恢复时按备份覆盖书架**（`64665ebd`）。开启后恢复会删掉「本机比备份多」的**在线书**。
