@@ -463,7 +463,11 @@ object Restore {
         // 把「完全不可逆」降级为「可手工找回」。
         writeOverwriteManifest(toDelete)
         toDelete.forEach { book ->
-            appDb.bookDao.getBook(book.bookUrl)?.delete()
+            // ⚠️ 用 `deleteWithoutShelfBackup()` 而不是 `delete()`：恢复期间删书是恢复自身的
+            // 一部分，不该触发一次自动备份 —— `backup()` 开头会 `FileUtils.delete(backupPath)`，
+            // 会把恢复**正在读取**的备份目录删掉。这里走**结构性隔离**，
+            // 不再依赖 `Restore.isRestoring` 这个运行时布尔（那条仍保留作第二道防线）。
+            appDb.bookDao.getBook(book.bookUrl)?.deleteWithoutShelfBackup()
         }
         AppLog.put("按备份覆盖：已删除 ${toDelete.size} 本备份中不存在的在线书籍")
         appCtx.toastOnUi(appCtx.getString(R.string.restore_overwrite_done, toDelete.size))

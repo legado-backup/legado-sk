@@ -292,6 +292,12 @@ object Backup {
                     return@withLock
                 }
                 val verified = ShelfIdentity.keysOf(appDb.bookDao.all)
+                // ⚠️ 拿锁后**必须复查**一次：`pendingShelfChangeJob` 是普通 var（无 volatile/无锁），
+                // 并发调用时后写覆盖前者，两个 job 都可能走到这里排队。先到的那个备份完并记了账，
+                // 后到的若不复查就会**再备份一遍同样的书架**（不损坏数据，但白白多传一次）。
+                if (encodeKeys(verified) == LocalConfig.lastShelfKeys) {
+                    return@withLock
+                }
                 backup(context, localPath, targets = BackupTargetConfig.selectedTargetsOrNull())
                 // ⚠️ 记账必须放在**备份成功之后**：放在开头的话，备份中途被取消/进程被杀
                 // 会留下「标记已更新但备份没做成」，该次变动此后永不补备份。
