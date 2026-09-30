@@ -339,6 +339,10 @@ uiautomator2 / ADB
 - ⚠️ 迁移后：下述第 3、4 条里的「migrate 仓库 / 只读上游 CCSSNE / 指定代理端口 31180/31181 与 github.com 代理 10808」是旧机的单向推送环境，本机不复存在。本机检出即 `skxingyu/legado-sk` 目标仓库本身（git init + remote 后直接推 main），推送前先用 `git remote -v` 与代理环境实测确认通道，不要照搬旧机代理参数。
 - 推送代码到 `skxingyu/legado-sk` 的 main：若走 gh CLI 直连可先 `gh api user` 确认可用；git 直连不通时用 gh token + 显式 URL（`$token = gh auth token`；目标仓库若 shallow，先 `git fetch --unshallow`）。具体直连命令写入 `companion\项目文档.md`（缺失时按实况重建）。
 - 用 gh CLI 分步发布，避免大文件上传中断：先 `gh release create "<tag>" --title "..." --notes-file "<CHANGELOG路径>"`（pre/Beta 版加 `--prerelease`），再 `gh release upload "<tag>" "<APK路径>"`；上传大文件前如走代理受阻，按实测 `unset HTTPS_PROXY HTTP_PROXY; export GODEBUG=http2client=0` 处理。
+  - ⚠️ **本机实测（2026-09-30，10076 发布踩到）：`gh release upload` 传 36 MB APK 会报 `HTTP 408: Upload body timed out due to inactivity`**，**重试同样失败**，且失败时**不会**留下半截资产（0 资产）。根因是本机环境变量里有 `https_proxy=http://127.0.0.1:10808`（另有 `NO_PROXY` 白名单，但**不含 github**）。
+  - **解法（已验证一次成功）**：上传前**清空代理变量**再直连 —— `$env:HTTPS_PROXY=''; $env:HTTP_PROXY=''; $env:https_proxy=''; $env:http_proxy=''`，可再带 `$env:GODEBUG='http2client=0'`。
+  - ⚠️ **注意 `git push` 与 `gh release create` 不受影响**（它们在本机走代理是通的），只有 **`gh release upload` 的大文件体**会被卡住。故不要因为 push 成功就以为上传也会成功。
+  - 排查手法：`Invoke-WebRequest https://uploads.github.com` 返回 200 **不代表**大文件上传能过（小请求经代理没问题）；应直接看 `gh release view <tag> --json assets` 是否为空。
 - tag 格式 `v3.26.<MMddHH>-<versionCode>`（如 `v3.26.082220-10018`）；发布后用 GitHub MCP `get_release_by_tag` 或网页复核 tag、目标提交、资产大小、中文排版与 Latest/prerelease 状态。
 - **发布类型默认 Pre-release**：除非作者明说「发布正式版/Latest」，一律以 `--prerelease` 发布为预览版（不顶替当前 Latest）；正式/转正需作者另行指示才发布非 Pre。此前 10030/10033 等即按此惯例发布 Pre。
 
