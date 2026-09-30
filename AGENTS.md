@@ -171,6 +171,8 @@ $versionName = '3.26.<MMddHH>c'            # 完整版本名（含 c 后缀）
 2. 按版本命名同存于 `C:\code\ai-code\legado-sk\release\`：`legado_sk_<versionName>c_<versionCode>_arm64-v8a.apk`。
 3. 共存版同存于 `C:\code\ai-code\legado-sk\release\`：`legado_sk_<versionName>c_<versionCode>_arm64-v8a_（共存版）.apk`（本地文件名带「（共存版）」，让用户一眼分清哪个能共存）。
    - ⚠️ **GitHub Release 资产名不支持非 ASCII 字符**：上传 `…_（共存版）.apk` 会被静默截断成 `…_arm64-v8a_.apk`（实测；用 API `PATCH` 改名为中文会得到 `default.apk`）。**Release 资产名一律用 ASCII 后缀 `_sk2-coexist`**，并在发布说明里写明它就是共存版。
+4. ⚠️ **`release/` 只保留最新版本**（2026-09-30 作者指示）：一旦新版本构建完成并收集齐，**删掉上一版及更早的本地 APK**（历史版本从 GitHub Release 重新下载即可）。目录里应只有 `legado-sk-arm64-v8a.apk`（固定名）+ 当前版本的两个包，共 3 个文件。
+   - ⚠️ **例外**：**从未发布过 Release 的版本删掉即不可恢复**（GitHub 上没有）。若某版本临时未发布且日后可能要用，删除前先向作者确认。
 
 ### 长命令和构建失败
 
