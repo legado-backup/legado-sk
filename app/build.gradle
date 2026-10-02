@@ -211,6 +211,14 @@ android {
             //options.compilerArgs << "-Xlint:unchecked"
         }
     }
+    // 源码级守卫测试会直接读这些文件。不声明为测试输入的话，
+    // 只改文件、不改 Kotlin 时 Test 任务会命中 build cache 复用旧结果（实测过），
+    // 断言就变成“看起来在断言、实际没执行”。
+    tasks.withType(Test).configureEach {
+        inputs.file("src/main/res/menu/book_read.xml")
+                .withPropertyName("cloudProgressMenuXml")
+                .withPathSensitivity(PathSensitivity.RELATIVE)
+    }
     lint { //忽略string翻译缺失，后面需要翻译时去掉，todo
         checkDependencies = false
         disable 'MissingTranslation'
