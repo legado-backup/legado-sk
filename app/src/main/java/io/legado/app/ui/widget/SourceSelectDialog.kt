@@ -21,7 +21,7 @@ import io.legado.app.lib.theme.applyUiLabelStyle
 import io.legado.app.lib.theme.applyUiSectionTitleStyle
 import io.legado.app.lib.theme.primaryTextColor
 import io.legado.app.lib.theme.surface.SurfaceStyles
-import io.legado.app.utils.SurfaceBackdrop
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
 import io.legado.app.utils.applyAdaptiveDim
 import io.legado.app.utils.dpToPx
 

@@ -32,8 +32,8 @@ import io.legado.app.utils.dpToPx
 import io.legado.app.utils.getCompatColor
 import io.legado.app.utils.invisible
 import io.legado.app.utils.loadAnimation
-import io.legado.app.utils.SurfaceBackdrop
-import io.legado.app.utils.findHostWindow
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
+import io.legado.app.lib.theme.surface.findHostWindow
 import io.legado.app.utils.visible
 
 /**

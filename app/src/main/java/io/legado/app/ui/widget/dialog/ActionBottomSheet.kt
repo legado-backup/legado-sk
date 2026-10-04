@@ -14,7 +14,7 @@ import io.legado.app.lib.dialogs.SelectItem
 import io.legado.app.lib.theme.UiCorner
 import io.legado.app.lib.theme.surface.SurfaceCorners
 import io.legado.app.lib.theme.surface.SurfaceStyles
-import io.legado.app.utils.SurfaceBackdrop
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
 import io.legado.app.utils.applyAdaptiveDim
 import io.legado.app.utils.dpToPx
 

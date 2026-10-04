@@ -53,8 +53,8 @@ import io.legado.app.utils.gone
 import io.legado.app.utils.invisible
 import io.legado.app.utils.isAbsUrl
 import io.legado.app.utils.isDataUrl
-import io.legado.app.utils.SurfaceBackdrop
-import io.legado.app.utils.findHostWindow
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
+import io.legado.app.lib.theme.surface.findHostWindow
 import io.legado.app.utils.openUrl
 import io.legado.app.utils.putPrefBoolean
 import io.legado.app.utils.showPopupMenu

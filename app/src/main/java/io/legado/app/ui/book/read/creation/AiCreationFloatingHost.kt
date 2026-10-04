@@ -7,7 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import io.legado.app.R
 import io.legado.app.help.ai.AiCreationImageTaskHolder
-import io.legado.app.utils.SurfaceBackdrop
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
 import io.legado.app.utils.dpToPx
 
 /**

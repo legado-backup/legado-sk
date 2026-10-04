@@ -41,7 +41,7 @@ import io.legado.app.ui.book.read.config.PageKeyDialog
 import io.legado.app.ui.file.HandleFileContract
 import io.legado.app.utils.ColorUtils
 import io.legado.app.utils.FileDoc
-import io.legado.app.utils.SurfaceBackdrop
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
 import io.legado.app.utils.find
 import io.legado.app.utils.getPrefString
 import io.legado.app.utils.gone

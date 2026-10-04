@@ -10,7 +10,7 @@ import io.legado.app.databinding.DialogUrlOptionEditBinding
 import io.legado.app.lib.theme.surface.SurfaceStyles
 import io.legado.app.model.analyzeRule.AnalyzeUrl
 import io.legado.app.utils.GSON
-import io.legado.app.utils.SurfaceBackdrop
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
 import io.legado.app.utils.applyDialogSurfaceBlur
 import io.legado.app.utils.setLayout
 

@@ -82,7 +82,7 @@ import io.legado.app.utils.dpToPx
 import io.legado.app.utils.flowWithLifecycleAndDatabaseChange
 import io.legado.app.utils.gone
 import io.legado.app.utils.InfoMap
-import io.legado.app.utils.SurfaceBackdrop
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
 import io.legado.app.utils.applyAdaptiveDim
 import io.legado.app.utils.windowSize
 import io.legado.app.utils.setEdgeEffectColor

@@ -37,7 +37,7 @@ import io.legado.app.ui.book.read.page.entities.TextChapter.Companion.emptyTextC
 import io.legado.app.ui.book.read.page.entities.column.TextBaseColumn
 import io.legado.app.ui.book.read.page.entities.column.TextColumn
 import io.legado.app.ui.book.read.page.provider.ChapterProvider
-import io.legado.app.utils.BackdropRenderState
+import io.legado.app.lib.theme.surface.BackdropRenderState
 import io.legado.app.utils.canvasrecorder.CanvasRecorderFactory
 import io.legado.app.utils.canvasrecorder.recordIfNeeded
 import io.legado.app.utils.dpToPx

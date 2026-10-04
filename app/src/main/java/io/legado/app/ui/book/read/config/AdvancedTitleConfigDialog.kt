@@ -41,7 +41,7 @@ import io.legado.app.model.ReadBook
 import io.legado.app.ui.code.CodeEditActivity
 import io.legado.app.ui.file.HandleFileContract
 import io.legado.app.utils.dpToPx
-import io.legado.app.utils.SurfaceBackdrop
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
 import io.legado.app.utils.applyDialogSurfaceBlur
 import io.legado.app.utils.postEvent
 import io.legado.app.utils.readText

@@ -35,8 +35,8 @@ import io.legado.app.utils.applyNavigationBarPadding
 import io.legado.app.utils.gone
 import io.legado.app.utils.invisible
 import io.legado.app.utils.loadAnimation
-import io.legado.app.utils.SurfaceBackdrop
-import io.legado.app.utils.findHostWindow
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
+import io.legado.app.lib.theme.surface.findHostWindow
 import io.legado.app.utils.openUrl
 import io.legado.app.utils.startActivity
 import io.legado.app.utils.visible

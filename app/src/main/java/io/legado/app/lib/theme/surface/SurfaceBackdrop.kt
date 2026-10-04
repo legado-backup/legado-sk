@@ -1,4 +1,4 @@
-package io.legado.app.utils
+package io.legado.app.lib.theme.surface
 
 import android.app.Activity
 import android.content.Context

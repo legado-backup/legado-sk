@@ -7,7 +7,7 @@ import android.view.ViewGroup
 import io.legado.app.constant.PreferKey
 import io.legado.app.databinding.DialogPageKeyBinding
 import io.legado.app.lib.theme.surface.SurfaceStyles
-import io.legado.app.utils.SurfaceBackdrop
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
 import io.legado.app.utils.getPrefString
 import io.legado.app.utils.hideSoftInput
 import io.legado.app.utils.putPrefString

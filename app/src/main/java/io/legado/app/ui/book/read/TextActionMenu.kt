@@ -30,8 +30,8 @@ import io.legado.app.lib.theme.uiTypeface
 import io.legado.app.utils.getPrefString
 import io.legado.app.utils.getPrefStringSet
 import io.legado.app.utils.dpToPx
-import io.legado.app.utils.SurfaceBackdrop
-import io.legado.app.utils.findHostWindow
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
+import io.legado.app.lib.theme.surface.findHostWindow
 import io.legado.app.utils.isAbsUrl
 import io.legado.app.utils.sendToClip
 import io.legado.app.utils.share

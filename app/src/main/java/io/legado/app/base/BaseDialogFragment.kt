@@ -23,7 +23,7 @@ import io.legado.app.lib.dialogs.applyHeaderlessDialogChrome
 import io.legado.app.lib.theme.applyUiBodyTypeface
 import io.legado.app.lib.theme.surface.SurfaceStyles
 import io.legado.app.lib.theme.surface.SurfaceStyle
-import io.legado.app.utils.SurfaceBackdrop
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
 import io.legado.app.utils.applyAdaptiveDim
 import io.legado.app.utils.dpToPx
 import io.legado.app.utils.setBackgroundKeepPadding

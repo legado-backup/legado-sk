@@ -27,10 +27,10 @@ import io.legado.app.R
 import io.legado.app.lib.theme.primaryTextColor
 import io.legado.app.lib.theme.surface.SurfaceStyles
 import io.legado.app.lib.theme.uiTypeface
-import io.legado.app.utils.SurfaceBackdrop
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
 import io.legado.app.utils.applyUiMenuStyle
 import io.legado.app.utils.dpToPx
-import io.legado.app.utils.findHostWindow
+import io.legado.app.lib.theme.surface.findHostWindow
 
 /**
  * A popup whose visible shell is owned by the application.
