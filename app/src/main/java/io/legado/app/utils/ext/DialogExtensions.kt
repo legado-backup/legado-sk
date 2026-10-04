@@ -24,6 +24,7 @@ import io.legado.app.lib.theme.ThemeStore
 import io.legado.app.lib.theme.accentColor
 import io.legado.app.lib.theme.surface.SurfaceStyles
 import io.legado.app.lib.theme.surface.SurfaceStyle
+import io.legado.app.lib.theme.surface.SurfaceBackdrop
 import splitties.systemservices.windowManager
 import java.util.WeakHashMap
 
