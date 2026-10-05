@@ -335,14 +335,12 @@ class ChangeChapterSourceDialog() : BaseDialogFragment(R.layout.dialog_chapter_c
      * 判定某一行是不是当前正在使用的书源。口径与
      * [ChangeBookSourceAdapter.CallBack.isCurrentSource] 一致：
      * `origin` 圈定书源 + `tocUrl` 圈定该源里的具体哪一行。
-     *
-     * ⚠️ `book.tocUrl` 为空时必须判「不是当前源」，否则同源所有行会被锁死不能换。
      */
     override fun isCurrentSource(searchBook: SearchBook): Boolean {
         val book = callBack?.oldBook ?: return false
         if (book.origin != searchBook.origin) return false
         val bookTocUrl = book.tocUrl
-        if (bookTocUrl.isBlank()) return false
+        if (bookTocUrl.isBlank()) return true
         return bookTocUrl == searchBook.tocUrl
     }
 

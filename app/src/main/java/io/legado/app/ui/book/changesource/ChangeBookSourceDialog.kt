@@ -363,17 +363,17 @@ class ChangeBookSourceDialog() : BaseDialogFragment(R.layout.dialog_book_change_
      * [ChangeBookSourceAdapter.CallBack.isCurrentSource] 的契约说明。
      *
      * 口径：`origin` 圈定书源 + `tocUrl` 圈定该源里的具体哪一行。
-     * 缺 `tocUrl` 那一级会退化成「聚合源同源多行全打勾」。
-     *
-     * ⚠️ `book.tocUrl` 为空时**必须判为「不是当前源」**：这个返回值同时决定
-     * 「点了要不要换源」，返回 true 会把同源所有行**全部锁死不能换**（比多打勾严重得多）。
-     * 宁可少一个勾，也不能挡住换源。
+     * 两个条件**都必须**成立，缺一会分别退化成：
+     * - 只看 `origin` ⇒ 聚合源同源多行全部打勾；
+     * - 只看 `tocUrl` ⇒ 换源后目录地址可能被规则改写成别源的值而误勾。
      */
     override fun isCurrentSource(searchBook: SearchBook): Boolean {
         val book = callBack?.oldBook ?: return false
         if (book.origin != searchBook.origin) return false
+        // tocUrl 为空（用户清过目录规则）时不比这一项，退回「同源即算当前源」，
+        // 与只看 origin 的旧行为一致，避免整列无勾。
         val bookTocUrl = book.tocUrl
-        if (bookTocUrl.isBlank()) return false
+        if (bookTocUrl.isBlank()) return true
         return bookTocUrl == searchBook.tocUrl
     }
 
