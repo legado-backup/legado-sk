@@ -366,12 +366,33 @@ uiautomator2 / ADB
 > **所有代码改动、编译、验证、产物收集一律以 `main` 为基底**，不需要每次向作者确认。其他分支（含 `feat/cleanup-cloud-backup`、`fix/review-r2`、`main-v2` 等）**默认一律不管**，除非作者在本次对话中**明确点名**某个分支。
 >
 > - **`feat/cleanup-cloud-backup`（10066–10072：按备份清理支持云端 + 备份/恢复共用锁）是试验分支**，作者尚未决定是否合并（仍有一些小问题）。**默认忽略它**：不要检查它、不要合并它、不要基于它编译、不要把它记为「当前交付」。
-> - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。**main 下一次 versionCode 从 `10076` 递增**。
+> - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
+>
+> **下一次交付 versionCode 从 `10082` 递增**（10081 为当前交付）。
 
 ---
 
-- ✅ **10076（`3.26.093012c`）——main 当前交付，✅ 已发布 Pre-release `v3.26.093012-10076`（2026-09-30）**（修复「加入书籍」不触发自动备份 + 补齐 3 个漏点 + 2 项加固 + 补跳过日志）：
+- ✅ **10081（`3.26.100515c`）——main 当前交付，✅ 已发布 Pre-release `v3.26.100515-10081`（2026-10-05）**（修复换源对话框「书源标记显示不正确」）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。
+  - **作者报的现场**：换源对话框里✓停在**曾经用过、但已不是当前源**的那一行；点它被判为「当前源」而拒绝换源，而实际在用的源反而没有标记。普通源与聚合源都会出现。
+  - **根因（两级）**：
+    1. **判据用 `bookUrl`，但归并后它不再等于当前源**。10054 起换源走 `BookUpsert` 身份归并，`BookUpsert.kt:99-103` 把合并结果的 `bookUrl` **强制回写成旧记录的**（主键兼缓存目录地址，不能变），只把 `origin` 换成新源；而列表每行的 `bookUrl` 由**新源**解析（`BookList.kt:281`）⇒ 两者永不相等。**这是 SK 归并机制与上游 UI 假设的契约冲突**：参照版本 legado-E / Legado_Max 的 `changeTo` 是 `delete()`+`insert()`，`bookUrl` 恒等于当前源，故它们没有此现象，两版 adapter 与 SK **逐字一致**。
+    2. **只改用 `origin` 也不对**：`origin` 只到**书源**粒度，聚合源一次搜索返回多条、各行 `origin` 相同 ⇒ **同源所有行全部打勾**（实测 9 行全勾）。⚠️ 此坑 10081 开发中**真实踩过并被实机截图抓到**，不要以为「换 origin 就完了」。
+  - **修法：`origin` 圈定书源 + `tocUrl` 圈定该源里的具体哪一行**，收敛到两个 Dialog 的 `isCurrentSource(searchBook)` **单一入口**（勾、点击拦截、底栏跳当前源、删当前源触发自动换源 四处共用）。
+    - `tocUrl` 之所以成立：由该行自己的详情页解析（`BookInfo.kt:151`）**行级唯一**，且 `BookMergeRules.mergeInto:161` 保留选中行的值 ⇒ 归并后仍能指回那一行。
+    - ⚠️ **残留边界（已登记，勿当新 bug 上报）**：`book.tocUrl` 为空时 10081 的写法是 `return true`（同源即算当前源）。若某天出现「某书源整列都点不动」，就是这里 —— 因为 `isCurrentSource` 的返回值**同时决定「点了要不要换源」**。作者已知悉并选择保持现状。
+  - **顺带修掉**：① 点当前源行原本**全程静默**（无 else 分支），现改为提示「当前已在使用该书源」；② 底栏「跳当前源」原本因同一 bookUrl 冲突**静默无效**；③ **删掉当前正在用的源不触发自动换源**（判据恒 false）。
+  - **回归锁** `ChangeSourceCurrentRowGuardTest`（6 项，`app/build.gradle` 声明了 `values/strings.xml`+`values-zh/strings.xml` 为 Test 输入，否则只改资源会命中 build cache 假绿）。
+    - ⚠️ **两条断言首版是无效断言，靠注入证伪才发现**：`guardAt < feedbackAt` 的**序关系**（把反馈移到 if/else 之外仍满足）→ 改为取 else 块本身；全文件 `contains(callBack.openToc(it))`（把调用包进守卫后子串仍在）→ 改为取点击块并断言块内无守卫。
+    - 证伪 **v5 6 项 + v6 5 项全 RED**。⚠️ **两条方法论教训**（本版踩过）：① **基线必须是「已提交的修复」**，否则 `git checkout` 会把修复本身还原，注入全部假红；② **注入必须可编译**，否则 RED 来自编译错而非断言 —— 判据是把「失败断言名」打出来，为空即无效证伪。
+  - **验证**：全量单测 **250 项 / 10 失败**（＝既有已知 10 项 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增**）。
+  - **实机回归（平板 `HA1KAPWG`）**：换源对话框正常列出、无重复标记、每行可点可换源；实际换源后**章节与位置不变**（第65章 8/15）；反复开关 5 轮 **pid 不变、0 崩溃 0 ANR**；崩溃缓冲全程 0 条。
+  - **产物**：正式版 36,169,149 字节（sha256 `3FD5C33E…`）＋ 共存版 36,168,800 字节（sha256 `BE4404FE…`）；均 `10081` / `3.26.100515c` / 阅读SK / arm64-v8a / 8 dex / apksigner exit 0。
+    - ⚠️ GitHub 资产名用 ASCII 后缀 **`_sk2-coexist`**（非 ASCII 会被静默截断），发布说明里写明它就是共存版。
+  - **下一次交付 versionCode 从 `10082` 递增。**
+
+- ✅ **10076（`3.26.093012c`）——历史交付，✅ 已发布 Pre-release `v3.26.093012-10076`（2026-09-30）**（修复「加入书籍」不触发自动备份 + 补齐 3 个漏点 + 2 项加固 + 补跳过日志）：
   - 分支 **main**（提交 `33ab2fb2` 主修 / `3e17ab5f` 加固）。**无 DB 迁移**（版本仍 117）。
   - **根因**：**`Book.save()` 不是加架的唯一收口**。全项目有**两个**写库收口，10075 只接了其一：
     | 收口 | 本质 | 10075 是否接 |
@@ -443,48 +464,6 @@ uiautomator2 / ADB
     - aapt 均 `10075` / `3.26.092916c` / 阅读SK / arm64-v8a / locales `'zh'`；`debuggable` 无输出；`classes*.dex` 均 **8** 个；apksigner exit 0（证书 SHA-256 `79fef578…`）。`release/legado-sk-arm64-v8a.apk`（固定名）已更新为 10075 正式版。
   - **下一次交付 versionCode 从 `10076` 递增。**
   - ⚠️ **验证共存版 APK 时注意**：`apksigner.bat` 传含 `（共存版）` 的路径会因批处理按 OEM 代码页解析参数而报「找不到文件」（**不是签名问题**）。绕法：先复制成 ASCII 名再验（`java -jar apksigner.jar` 直调同样会中招）。
-
-- ✅ **10074（`3.26.092915c`）已构建并安装到平板实机（2026-09-29）——历史交付（新增「自动备份」+「恢复按备份覆盖」）**：
-  - 分支 **main**（提交 `64665ebd` / `120bcc16` / `9257bc3c`）。**无 DB 迁移**。
-  - ⚠️ **两个新开关默认都是关**（作者确认）：`autoBackupOnShelfChange`、`overwriteShelfOnRestore`。
-  - **改动一：恢复时按备份覆盖书架**（`64665ebd`）。开启后恢复会删掉「本机比备份多」的**在线书**。
-    - 判据抽 `help/book/ShelfIdentity.kt`：**搬** `ShelfCleanupRules.keyOf` 的 **trim** 口径（**不是重写**）。
-    - ⚠️ **判据必须 trim**：备份与本机书名/作者可能只在首尾空白上不同，不归一会把备份里确实存在的书误判为「本机多余」→ **删掉有阅读历史的那条**。`BookMergeRules.identityKeyOf` **刻意不 trim**，两者不可互相替代、不得合并。
-    - ⚠️ **三道守卫缺一即可能删光书架**：① `bookshelf.json` 不存在 ⇒ 拒绝删除（它与 `covers` 绑在同一「书架」可勾选项，取消勾选会让该文件不存在 ⇒ 备份在线书集合为空 ⇒ 全部−空 = 删光）；② 解析失败 ⇒ 拒绝删除（**禁止 `orEmpty()` 降级**）；③ 两侧集合都过滤离线书。
-    - ⚠️ **本机集合必须在 merge 之前取快照**（`localKeysBeforeMerge`）。
-    - ⚠️ **删书放在恢复最末尾、DB 事务之外**（`RestoreJournal` 快照不含 `legado.db`）。
-    - 删除前落清单 `filesDir/deleted-books-<ts>.json`（可手工找回）。
-    - **回归锁**：`ShelfIdentityTest`（11）+ `RestoreOverwriteGuardTest`（7），已双向证伪。
-  - **改动二：书架变动时自动备份**（`120bcc16`）。**⚠️ 本版此功能实际不可用，已在 10075 修复 —— 改这里前务必先读上面 10075 条。**
-  - **改动三：移除「按备份清理本机书籍」入口**（`9257bc3c`）。判据语义未丢（已迁入 `ShelfIdentity`）。
-  - **产物**：`release/…_10074_arm64-v8a.apk`（36,172,863 字节，sha256 `EDA85BEC…`）＋ `…_（共存版）.apk`（36,172,644 字节，sha256 `BC68F827…`）。**未发布 Release。**
-
-- ✅ **10073（`3.26.092401c`）——历史交付（新增「默认备份内容」）；✅ 已发布 Pre-release `v3.26.092401-10073`（2026-09-24）**：
-  - 分支 **main**（提交 `fe182e31`）。**无 DB 迁移**。两包均已上传 Release 资产（共存版资产名用 ASCII `_sk2-coexist`）。
-  - **`BackupTargetConfig`**（`filesDir/backupTarget.json`）持久化备份范围，一次设定长期生效。
-    - ⚠️ **未保存过的项必须默认勾选**（`selections[key] ?: true`）：升级后无该文件，**默认方向反了会让第一次备份变成空包**而用户以为备份成功。
-    - ⚠️ 项目 `key` 一旦发布即存量设备持久化键，**只能新增、不能改名或复用**。
-  - **`BackupItems`**（storage 层）把 18 个分组清单从 UI 层提升上来，**备份与恢复共用同一份**。
-    - ⚠️ **不得在两侧各留一份**：漂移会导致「恢复把不该恢复的内容恢复了且无任何报错」。
-    - ⚠️ `BackupItems.navigationBarDirName` 必须是**字面量**（引用 `rootDir` 会读 `appCtx`，使整份清单无法在 JVM 单测求值）；由 `Backup.navigationBarDirNameStaysInSync()` 比对。
-  - **备份入口不再弹框**（`selectBackupTargets`）：全选 → `targets = null`（旧「全部打包」语义，新增目标自动包含）；部分勾选 → 下发集合；**一个都没勾 → 拒绝 + toast**（`R.string.backup_select_none`），**绝不塌缩成"全打包"或"空包"**。
-  - ⚠️ **恢复侧行为一字未改**：仍逐次询问、仍只服从「恢复忽略列表」。**本项只管备份范围，两套语义互不干扰**。
-  - **回归锁**：`BackupTargetConfigTest`（7 项，源码级静态断言），已双向证伪。
-  - **产物**：正式版 36,184,360 字节（sha256 `ec20ad38…`）＋ 共存版 36,184,231 字节（sha256 `d76f2eab…`），均按 `initWith release` 重编。
-    - ⚠️ **10073 首版共存包（44,542,383 字节）已废弃**：那是 `initWith debug` 产物，带 `debuggable=true` 且 23 个未合并 dex。
-
----
-
-> **更早版本（10004–10072）**：本文件不再记录。查 `companion\发布版更新记录.md` §1 逐版净增量，或 `companion\项目文档.md` §2.1 版本索引，或 git log / GitHub Releases。
-
-> ⚠️ **语言裁剪边界（2026-09-10 修正，不随版本过期）**：`resConfigs "zh"` **会裁掉同语言 region 变体**。产物实测 `locales: '--_--' 'zh'`，`unzip -l` 中 `zh-rHK|zh-rTW` 计数为 **0**。故 `values-zh-rHK` / `values-zh-rTW` 是**不进 APK 的死资源**（已于 10038 删除）。**「缺失 HK/TW 字符串会回退到简体/英文」的说法不成立**——该 locale 整体不存在。
-
-> ⚠️ **重植上游后必须核查并删除 `.github/dependabot.yml`（2026-09-10）**：SK 版不使用 Dependabot。因本仓库是独立仓库而非 fork，不继承上游配置，但**每次重植都会把该文件重新带入**（已删过两次：`e080aa96`、`fe4d57a8`）。重植后执行 `git cat-file -e HEAD:.github/dependabot.yml` 确认不存在；若被带入则删除并单独提交。
-> 判断依据可复用：① `modules/web` **不参与 APK 构建**（`settings.gradle` 仅 `include ':app'` / `':modules:book'` / `':modules:rhino'`）；② `gradle/libs.versions.toml` 的 kotlin/ksp/AGP/wrapper 属**已验证的构建工具链组合**，跨大版本升级会破坏 `assembleAppRelease`，不得自动合入。
-
-> 重植方法论修正（10037 教训）：核对「SK 定制是否全部保留」必须以 `git diff <旧基底> <旧SK main>` 的**全量内容比对**为准（新增行 + 删除行双向核查），不能只依赖按功能分簇的素材清单——10036 即因分簇清单不全而漏植约十项。
-
-每次交付后当场更新本节（追加新条 + 挤掉最老的）。历史发布信息从 Git、GitHub Release 或 `companion\发布版更新记录.md` 查询，不在本文件累积。
 
 ## 7. 当前机器环境与配套文档（2026-09-04 迁移后）
 
