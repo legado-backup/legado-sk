@@ -78,20 +78,33 @@ class ChangeSourceCurrentRowGuardTest {
         )
     }
 
-    /** ② 反向：反馈必须晚于「是否当前源」的判断，否则每次点击都提示，掩盖真实换源。 */
+    /**
+     * ② 反向：反馈必须**结构上位于 else 分支内部**，不能只是"在判断之后出现"。
+     *
+     * ⚠️ 首版写 `guardAt < feedbackAt` 是无效断言：把调用移到整个 if/else **之后**
+     * （即无条件提示）仍然满足该序关系，注入实测仍 GREEN。必须取 else 块本身。
+     */
     @Test
     fun feedbackIsConditionalNotUnconditional() {
         val block = itemViewClickBlock()
         val guardAt = block.indexOf("!= callBack.oldBookUrl")
-        val feedbackAt = block.indexOf("onCurrentSourceClick(")
         val changeAt = block.indexOf("changeTo(")
         assertTrue("换源主路径 changeTo 不得被删", changeAt >= 0)
         assertTrue("必须存在对当前源的判断", guardAt >= 0)
-        assertTrue("else 分支里必须真的调用反馈", feedbackAt >= 0)
+
+        // 取 else 之后、块结束之前的那一段（块尾已由 onLongClick 收边）。
+        val elseBranch = block.substringAfter("else")
         assertTrue(
-            "反馈必须落在「是当前源」之后，不能无条件提示",
-            guardAt < feedbackAt
+            "必须存在 else 分支，反馈不能无条件执行",
+            block.contains("else") && elseBranch.isNotBlank()
         )
+        assertTrue(
+            "反馈必须写在 else 分支内部，不能提到 if/else 之外（否则每次点击都提示）",
+            elseBranch.contains("onCurrentSourceClick(")
+        )
+        // 反馈不得出现在 else 之前（即不得无条件执行）。
+        val feedbackAt = block.indexOf("onCurrentSourceClick(")
+        assertTrue("反馈必须晚于对当前源的判断", guardAt < feedbackAt)
     }
 
     /** ③ 接线完整性：接口方法与 Dialog 实现必须同时存在，且实现要发用户可见反馈。 */
@@ -134,17 +147,29 @@ class ChangeSourceCurrentRowGuardTest {
     /**
      * ⑤ 单章换源不得被顺手改成「提示」：
      * 它点当前源本来就是**打开目录预览**（可用功能），加守卫等于砍功能。
+     *
+     * ⚠️ 首版用全文件 `contains("callBack.openToc(it)")` 是无效断言：
+     * 注入「把该调用包进 `if (bookUrl != oldBookUrl) { … }`」后子串仍存在，实测仍 GREEN。
+     * 必须取那个点击块本身，并断言块内**没有**对当前源的判断。
      */
     @Test
-    fun chapterSourceDialogKeepsTocPreview() {
+    fun chapterSourceKeepsDirectTocPreview() {
         val source = executableOnly(
             moduleSource(
                 "src/main/java/io/legado/app/ui/book/changesource/ChangeChapterSourceAdapter.kt"
             )
         )
+        val block = source
+            .substringAfter("holder.itemView.setOnClickListener")
+            .substringBefore("holder.itemView.onLongClick")
+        assertTrue("未能定位单章换源的行点击块（锚点已漂移）", block.isNotBlank())
         assertTrue(
-            "单章换源点行必须仍直接 openToc（当前源可查看目录）",
-            source.contains("callBack.openToc(it)")
+            "单章换源点行必须直接 openToc（当前源可查看目录）",
+            block.contains("callBack.openToc(it)")
+        )
+        assertTrue(
+            "单章换源不得引入「是否当前源」的守卫 —— 那会砍掉点当前源查看目录的能力",
+            !block.contains("oldBookUrl")
         )
     }
 }
