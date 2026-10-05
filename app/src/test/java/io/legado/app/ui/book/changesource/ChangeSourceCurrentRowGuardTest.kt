@@ -210,6 +210,13 @@ class ChangeSourceCurrentRowGuardTest {
                 "$name 的判据不得回退到 bookUrl（归并后恒不等于当前行）",
                 Regex("""bookUrl\s*[!=]=""").containsMatchIn(body)
             )
+            // ⚠️ tocUrl 为空时必须判「不是当前源」。该返回值同时决定「点了要不要换源」，
+            // 返回 true 会把同源所有行**全部锁死不能换** —— 比多打一个勾严重得多。
+            assertTrue(
+                "$name 的 tocUrl 分支必须 fail-safe（为空返回 false），不得返回 true 把同源行锁死",
+                !body.contains("isBlank()) return true") &&
+                        !body.contains("isEmpty()) return true")
+            )
         }
     }
 }
