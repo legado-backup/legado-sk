@@ -218,6 +218,14 @@ android {
         inputs.file("src/main/res/menu/book_read.xml")
                 .withPropertyName("cloudProgressMenuXml")
                 .withPathSensitivity(PathSensitivity.RELATIVE)
+        // ChangeSourceCurrentRowGuardTest 断言换源适配器与其字符串资源。
+        // 资源不进 JVM 单测 classpath（只编成 R 里的 int id，内容变化不改任何 class 字节），
+        // 不声明就会在「只改 xml/字符串、不改 .kt」时命中 build cache 复用旧结果。
+        inputs.files(
+                "src/main/res/values/strings.xml",
+                "src/main/res/values-zh/strings.xml"
+        ).withPropertyName("changeSourceCurrentRowGuardResources")
+                .withPathSensitivity(PathSensitivity.RELATIVE)
     }
     lint { //忽略string翻译缺失，后面需要翻译时去掉，todo
         checkDependencies = false
