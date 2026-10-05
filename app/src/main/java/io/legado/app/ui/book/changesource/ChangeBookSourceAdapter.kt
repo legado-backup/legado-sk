@@ -60,7 +60,7 @@ class ChangeBookSourceAdapter(
                 tvLast.text = item.getDisplayLastChapterTitle()
                 tvCurrentChapterWordCount.text = item.chapterWordCountText
                 tvRespondTime.text = context.getString(R.string.respondTime, item.respondTime)
-                if (callBack.oldBookUrl == item.bookUrl) {
+                if (callBack.oldBookOrigin == item.origin) {
                     ivChecked.visible()
                 } else {
                     ivChecked.invisible()
@@ -72,7 +72,7 @@ class ChangeBookSourceAdapter(
                         when (it) {
                             "name" -> tvOrigin.text = item.originName
                             "latest" -> tvLast.text = item.getDisplayLastChapterTitle()
-                            "upCurSource" -> if (callBack.oldBookUrl == item.bookUrl) {
+                            "upCurSource" -> if (callBack.oldBookOrigin == item.origin) {
                                 ivChecked.visible()
                             } else {
                                 ivChecked.invisible()
@@ -176,7 +176,7 @@ class ChangeBookSourceAdapter(
         }
         holder.itemView.setOnClickListener {
             getItem(holder.layoutPosition)?.let {
-                if (it.bookUrl != callBack.oldBookUrl) {
+                if (it.origin != callBack.oldBookOrigin) {
                     callBack.changeTo(it)
                 } else {
                     // 该行就是当前书源（右侧带勾）。原实现直接静默返回，
@@ -226,7 +226,15 @@ class ChangeBookSourceAdapter(
     }
 
     interface CallBack {
-        val oldBookUrl: String?
+        /**
+         * 当前**正在使用**的书源 URL（`book.origin`），是判定「本行是不是当前源」的唯一真值。
+         *
+         * ⚠️ 不能用 `bookUrl` 判（原实现如此）：10054 起换源走 `BookUpsert` 身份归并，
+         * `BookMergeRules.mergeInto` 保留 keep 的 `bookUrl`（旧源地址）只把 `origin` 换成新源，
+         * 于是合并后旧 `bookUrl` 永远不等于搜索列表里任何一行的 `bookUrl`（它们由新源解析），
+         * 勾会**停在旧源那一行**，且点旧源行被拦、点新源行才放行。
+         */
+        val oldBookOrigin: String?
         fun changeTo(searchBook: SearchBook)
 
         /** 点到「当前正在使用的书源」那一行：不能换源，但必须给出可见反馈。 */

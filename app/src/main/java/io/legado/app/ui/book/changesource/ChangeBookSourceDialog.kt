@@ -329,7 +329,7 @@ class ChangeBookSourceDialog() : BaseDialogFragment(R.layout.dialog_book_change_
 
     private fun scrollToDurSource() {
         adapter.getItems().forEachIndexed { index, searchBook ->
-            if (searchBook.bookUrl == oldBookUrl) {
+            if (searchBook.origin == oldBookOrigin) {
                 (binding.recyclerView.layoutManager as LinearLayoutManager)
                     .scrollToPositionWithOffset(index, 60.dpToPx())
                 return
@@ -358,8 +358,16 @@ class ChangeBookSourceDialog() : BaseDialogFragment(R.layout.dialog_book_change_
         }
     }
 
-    override val oldBookUrl: String?
-        get() = callBack?.oldBook?.bookUrl
+    /**
+     * ⚠️ 「当前源」必须按 `origin` 判，不能按 `bookUrl`。
+     *
+     * 10054 起换源走 `BookUpsert` 身份归并：`BookMergeRules.mergeInto` 保留旧记录的
+     * `bookUrl`（主键兼缓存目录地址，不能变），只把 `origin` 换成新源。于是合并后
+     * 旧 `bookUrl` 是**旧源**地址，而列表每行的 `bookUrl` 是**新源**解析出来的，
+     * 两者永不相等 ⇒ 勾停在旧源那一行，且点旧源行被拦截。
+     */
+    override val oldBookOrigin: String?
+        get() = callBack?.oldBook?.origin
 
     /**
      * 点到当前正在使用的书源：不换源（重复解析目录没有意义），但必须告知原因，
@@ -389,7 +397,7 @@ class ChangeBookSourceDialog() : BaseDialogFragment(R.layout.dialog_book_change_
 
     override fun deleteSource(searchBook: SearchBook) {
         viewModel.del(searchBook)
-        if (oldBookUrl == searchBook.bookUrl) {
+        if (oldBookOrigin == searchBook.origin) {
             viewModel.autoChangeSource(callBack?.oldBook?.type) { book, toc, source ->
                 callBack?.changeTo(source, book, toc)
             }
@@ -479,7 +487,7 @@ class ChangeBookSourceDialog() : BaseDialogFragment(R.layout.dialog_book_change_
             adapter.notifyItemRangeChanged(
                 0,
                 adapter.itemCount,
-                bundleOf(Pair("upCurSource", oldBookUrl))
+                bundleOf(Pair("upCurSource", oldBookOrigin))
             )
         }
     }

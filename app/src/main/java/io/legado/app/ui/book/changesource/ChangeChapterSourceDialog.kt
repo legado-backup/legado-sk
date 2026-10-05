@@ -305,7 +305,7 @@ class ChangeChapterSourceDialog() : BaseDialogFragment(R.layout.dialog_chapter_c
 
     private fun scrollToDurSource() {
         searchBookAdapter.getItems().forEachIndexed { index, searchBook ->
-            if (searchBook.bookUrl == oldBookUrl) {
+            if (searchBook.origin == oldBookOrigin) {
                 (binding.recyclerView.layoutManager as LinearLayoutManager)
                     .scrollToPositionWithOffset(index, 60.dpToPx())
                 return
@@ -331,8 +331,13 @@ class ChangeChapterSourceDialog() : BaseDialogFragment(R.layout.dialog_chapter_c
         })
     }
 
-    override val oldBookUrl: String?
-        get() = callBack?.oldBook?.bookUrl
+    /**
+     * ⚠️ 「当前源」按 `origin` 判，不能按 `bookUrl`：10054 起换源走 `BookUpsert` 身份归并，
+     * `BookMergeRules.mergeInto` 保留旧记录的 `bookUrl` 只换 `origin`，
+     * 故合并后旧 `bookUrl` 与列表行的新源 URL 永不相等，勾会停在旧源那行。
+     */
+    override val oldBookOrigin: String?
+        get() = callBack?.oldBook?.origin
 
     override fun topSource(searchBook: SearchBook) {
         viewModel.topSource(searchBook)
@@ -354,7 +359,7 @@ class ChangeChapterSourceDialog() : BaseDialogFragment(R.layout.dialog_chapter_c
 
     override fun deleteSource(searchBook: SearchBook) {
         viewModel.del(searchBook)
-        if (oldBookUrl == searchBook.bookUrl) {
+        if (oldBookOrigin == searchBook.origin) {
             viewModel.autoChangeSource(callBack?.oldBook?.type) { book, toc, source ->
                 callBack?.changeTo(source, book, toc)
             }
@@ -409,7 +414,7 @@ class ChangeChapterSourceDialog() : BaseDialogFragment(R.layout.dialog_chapter_c
             searchBookAdapter.notifyItemRangeChanged(
                 0,
                 searchBookAdapter.itemCount,
-                bundleOf(Pair("upCurSource", oldBookUrl))
+                bundleOf(Pair("upCurSource", oldBookOrigin))
             )
         }
     }
