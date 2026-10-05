@@ -88,7 +88,7 @@ class ChangeSourceCurrentRowGuardTest {
     @Test
     fun feedbackIsConditionalNotUnconditional() {
         val block = itemViewClickBlock()
-        val guardAt = block.indexOf("!= callBack.oldBookOrigin")
+        val guardAt = block.indexOf("!callBack.isCurrentSource(")
         val changeAt = block.indexOf("changeTo(")
         assertTrue("换源主路径 changeTo 不得被删", changeAt >= 0)
         assertTrue("必须存在对当前源的判断", guardAt >= 0)
@@ -170,48 +170,45 @@ class ChangeSourceCurrentRowGuardTest {
         )
         assertTrue(
             "单章换源不得引入「是否当前源」的守卫 —— 那会砍掉点当前源查看目录的能力",
-            !block.contains("oldBookOrigin")
+            !block.contains("isCurrentSource")
         )
     }
 
     /**
-     * ⑥ **本缺陷的正主**：整个换源包判定「哪一行是当前源」必须用 `origin`，不得用 `bookUrl`。
+     * ⑥ **本缺陷的正主**：判定「哪一行是当前源」的实现在两个 Dialog 里，且必须是
+     * 「`origin` 圈定书源 + `tocUrl` 圈定行」两级判据。
      *
-     * 为什么：10054 起换源走 `BookUpsert` 身份归并，`BookMergeRules.mergeInto` 保留旧记录的
-     * `bookUrl`（主键兼缓存目录地址）只把 `origin` 换新源。于是合并后旧 `bookUrl` 与列表行的
-     * `bookUrl`（由新源解析）**永不相等** ⇒ 勾停在旧源那行、点旧源行被拦。
-     * 实测现象：随手换过源后，勾永远留在**曾经用过**的那个源上。
-     *
-     * 判据只允许出现在 `origin` 上；`bookUrl` 一旦重新参与「是不是当前源」的比较即为回归。
+     * 三级退化都会实测复现过，缺一不可：
+     * - 只看 `bookUrl`：10054 起换源走 `BookUpsert` 身份归并，`BookUpsert.kt:99-103`
+     *   把合并结果 `bookUrl` 强制回写成**旧记录**的 ⇒ 勾停在旧源那行（原始 bug）。
+     * - 只看 `origin`：只到书源粒度，聚合源一次返回多条、各行 `origin` 相同
+     *   ⇒ **同源所有行全部打勾**（实测 9 行全勾）。
+     * - 两级都要有：`tocUrl` 由该行自己的详情页解析（`BookInfo.kt:151`）而行级唯一，
+     *   且 `BookMergeRules.mergeInto:161` 保留选中行的值 ⇒ 归并后仍能指回那一行。
      */
     @Test
-    fun currentSourceIsJudgedByOriginNotBookUrl() {
-        val files = listOf(
-            "ChangeBookSourceAdapter.kt",
-            "ChangeBookSourceDialog.kt",
-            "ChangeChapterSourceAdapter.kt",
-            "ChangeChapterSourceDialog.kt"
-        )
-        for (name in files) {
+    fun currentSourceIsJudgedByOriginAndTocUrl() {
+        for (name in listOf("ChangeBookSourceDialog.kt", "ChangeChapterSourceDialog.kt")) {
             val src = executableOnly(
                 moduleSource("src/main/java/io/legado/app/ui/book/changesource/$name")
             )
-            // ① 不得再有「当前源」性质的 bookUrl 比较（旧书 url 或行 bookUrl 都不行）
-            assertFalse(
-                "$name 仍存在以 bookUrl 判定当前源的比较（归并后恒不相等，勾会错位）",
-                src.contains("oldBookUrl") ||
-                        Regex("""bookUrl\s*[!=]=\s*.*origin""").containsMatchIn(src) ||
-                        Regex("""origin\s*[!=]=\s*.*bookUrl""").containsMatchIn(src)
-            )
-        }
-        // ② 四个文件都必须真的用 origin 判定（防止「什么都没比」也算过）
-        for (name in files) {
-            val src = executableOnly(
-                moduleSource("src/main/java/io/legado/app/ui/book/changesource/$name")
+            val implAt = src.indexOf("override fun isCurrentSource(")
+            assertTrue("$name 必须实现 isCurrentSource", implAt >= 0)
+            val bodyStart = implAt + "override fun isCurrentSource(".length
+            val nextAt = src.indexOf("override fun", bodyStart)
+            val body = src.substring(bodyStart, if (nextAt > bodyStart) nextAt else src.length)
+            assertTrue("未能定位 $name 的 isCurrentSource 方法体", body.isNotBlank())
+            assertTrue(
+                "$name 的 isCurrentSource 必须用 origin 圈定书源",
+                body.contains("origin")
             )
             assertTrue(
-                "$name 必须按 origin 判定当前源",
-                src.contains("oldBookOrigin")
+                "$name 的 isCurrentSource 必须再用 tocUrl 圈定具体哪一行（否则聚合源同源多行会全打勾）",
+                body.contains("tocUrl")
+            )
+            assertFalse(
+                "$name 的判据不得回退到 bookUrl（归并后恒不等于当前行）",
+                Regex("""bookUrl\s*[!=]=""").containsMatchIn(body)
             )
         }
     }

@@ -329,7 +329,7 @@ class ChangeBookSourceDialog() : BaseDialogFragment(R.layout.dialog_book_change_
 
     private fun scrollToDurSource() {
         adapter.getItems().forEachIndexed { index, searchBook ->
-            if (searchBook.origin == oldBookOrigin) {
+            if (isCurrentSource(searchBook)) {
                 (binding.recyclerView.layoutManager as LinearLayoutManager)
                     .scrollToPositionWithOffset(index, 60.dpToPx())
                 return
@@ -359,15 +359,23 @@ class ChangeBookSourceDialog() : BaseDialogFragment(R.layout.dialog_book_change_
     }
 
     /**
-     * ⚠️ 「当前源」必须按 `origin` 判，不能按 `bookUrl`。
+     * 判定某一行是不是当前正在使用的书源。详见
+     * [ChangeBookSourceAdapter.CallBack.isCurrentSource] 的契约说明。
      *
-     * 10054 起换源走 `BookUpsert` 身份归并：`BookMergeRules.mergeInto` 保留旧记录的
-     * `bookUrl`（主键兼缓存目录地址，不能变），只把 `origin` 换成新源。于是合并后
-     * 旧 `bookUrl` 是**旧源**地址，而列表每行的 `bookUrl` 是**新源**解析出来的，
-     * 两者永不相等 ⇒ 勾停在旧源那一行，且点旧源行被拦截。
+     * 口径：`origin` 圈定书源 + `tocUrl` 圈定该源里的具体哪一行。
+     * 两个条件**都必须**成立，缺一会分别退化成：
+     * - 只看 `origin` ⇒ 聚合源同源多行全部打勾；
+     * - 只看 `tocUrl` ⇒ 换源后目录地址可能被规则改写成别源的值而误勾。
      */
-    override val oldBookOrigin: String?
-        get() = callBack?.oldBook?.origin
+    override fun isCurrentSource(searchBook: SearchBook): Boolean {
+        val book = callBack?.oldBook ?: return false
+        if (book.origin != searchBook.origin) return false
+        // tocUrl 为空（用户清过目录规则）时不比这一项，退回「同源即算当前源」，
+        // 与只看 origin 的旧行为一致，避免整列无勾。
+        val bookTocUrl = book.tocUrl
+        if (bookTocUrl.isBlank()) return true
+        return bookTocUrl == searchBook.tocUrl
+    }
 
     /**
      * 点到当前正在使用的书源：不换源（重复解析目录没有意义），但必须告知原因，
@@ -397,7 +405,7 @@ class ChangeBookSourceDialog() : BaseDialogFragment(R.layout.dialog_book_change_
 
     override fun deleteSource(searchBook: SearchBook) {
         viewModel.del(searchBook)
-        if (oldBookOrigin == searchBook.origin) {
+        if (isCurrentSource(searchBook)) {
             viewModel.autoChangeSource(callBack?.oldBook?.type) { book, toc, source ->
                 callBack?.changeTo(source, book, toc)
             }
@@ -484,10 +492,12 @@ class ChangeBookSourceDialog() : BaseDialogFragment(R.layout.dialog_book_change_
 
     override fun observeLiveBus() {
         observeEvent<String>(EventBus.SOURCE_CHANGED) {
+            // payload 的**值不被读取**，adapter 只认 "upCurSource" 这个 key 来触发重算
+            // （见 ChangeBookSourceAdapter.convert 的 payload 分支）。故这里传 true 即可。
             adapter.notifyItemRangeChanged(
                 0,
                 adapter.itemCount,
-                bundleOf(Pair("upCurSource", oldBookOrigin))
+                bundleOf(Pair("upCurSource", true))
             )
         }
     }

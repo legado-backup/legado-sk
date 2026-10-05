@@ -60,7 +60,7 @@ class ChangeBookSourceAdapter(
                 tvLast.text = item.getDisplayLastChapterTitle()
                 tvCurrentChapterWordCount.text = item.chapterWordCountText
                 tvRespondTime.text = context.getString(R.string.respondTime, item.respondTime)
-                if (callBack.oldBookOrigin == item.origin) {
+                if (callBack.isCurrentSource(item)) {
                     ivChecked.visible()
                 } else {
                     ivChecked.invisible()
@@ -72,7 +72,7 @@ class ChangeBookSourceAdapter(
                         when (it) {
                             "name" -> tvOrigin.text = item.originName
                             "latest" -> tvLast.text = item.getDisplayLastChapterTitle()
-                            "upCurSource" -> if (callBack.oldBookOrigin == item.origin) {
+                            "upCurSource" -> if (callBack.isCurrentSource(item)) {
                                 ivChecked.visible()
                             } else {
                                 ivChecked.invisible()
@@ -176,7 +176,7 @@ class ChangeBookSourceAdapter(
         }
         holder.itemView.setOnClickListener {
             getItem(holder.layoutPosition)?.let {
-                if (it.origin != callBack.oldBookOrigin) {
+                if (!callBack.isCurrentSource(it)) {
                     callBack.changeTo(it)
                 } else {
                     // 该行就是当前书源（右侧带勾）。原实现直接静默返回，
@@ -227,14 +227,22 @@ class ChangeBookSourceAdapter(
 
     interface CallBack {
         /**
-         * 当前**正在使用**的书源 URL（`book.origin`），是判定「本行是不是当前源」的唯一真值。
+         * 判断某一行**是不是当前正在使用的书源**。
          *
-         * ⚠️ 不能用 `bookUrl` 判（原实现如此）：10054 起换源走 `BookUpsert` 身份归并，
-         * `BookMergeRules.mergeInto` 保留 keep 的 `bookUrl`（旧源地址）只把 `origin` 换成新源，
-         * 于是合并后旧 `bookUrl` 永远不等于搜索列表里任何一行的 `bookUrl`（它们由新源解析），
-         * 勾会**停在旧源那一行**，且点旧源行被拦、点新源行才放行。
+         * ⚠️ 这里是本对话框唯一判定「当前源」的地方，两个 Adapter 的勾与点击拦截都走它，
+         * 不要再各自内联比较字段。
+         *
+         * 为什么不能只看 `bookUrl`（原实现）也不能只看 `origin`：
+         * - `bookUrl`：10054 起换源走 `BookUpsert` 身份归并，`BookUpsert.kt:99-103`
+         *   会把合并结果的 `bookUrl` **强制回写成旧记录的**（主键兼缓存目录地址，不能变），
+         *   于是库里 `bookUrl` 永远指不到「刚选中的那一行」⇒ 勾停在旧源那行。
+         * - `origin`：只到**书源**粒度。一个书源（尤其聚合源）一次搜索返回多条，
+         *   各行 `origin` 相同而 `bookUrl` 不同 ⇒ 会把同源所有行**全部打勾**。
+         * - `tocUrl`：由该行自己的详情页解析（`BookInfo.kt:151`），**行级唯一**，
+         *   且 `BookMergeRules.mergeInto:161` 保留了选中行的值 ⇒ 归并后仍能指回那一行。
+         *   故以 `origin` 圈定书源、`tocUrl` 圈定具体哪一行。
          */
-        val oldBookOrigin: String?
+        fun isCurrentSource(searchBook: SearchBook): Boolean
         fun changeTo(searchBook: SearchBook)
 
         /** 点到「当前正在使用的书源」那一行：不能换源，但必须给出可见反馈。 */

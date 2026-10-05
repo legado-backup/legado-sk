@@ -57,7 +57,7 @@ class ChangeChapterSourceAdapter(
                 tvLast.text = item.getDisplayLastChapterTitle()
                 tvCurrentChapterWordCount.text = item.chapterWordCountText
                 tvRespondTime.text = context.getString(R.string.respondTime, item.respondTime)
-                if (callBack.oldBookOrigin == item.origin) {
+                if (callBack.isCurrentSource(item)) {
                     ivChecked.visible()
                 } else {
                     ivChecked.invisible()
@@ -69,7 +69,7 @@ class ChangeChapterSourceAdapter(
                         when (it) {
                             "name" -> tvOrigin.text = item.originName
                             "latest" -> tvLast.text = item.getDisplayLastChapterTitle()
-                            "upCurSource" -> if (callBack.oldBookOrigin == item.origin) {
+                            "upCurSource" -> if (callBack.isCurrentSource(item)) {
                                 ivChecked.visible()
                             } else {
                                 ivChecked.invisible()
@@ -191,8 +191,8 @@ class ChangeChapterSourceAdapter(
     }
 
     interface CallBack {
-        /** 当前**正在使用**的书源 URL（`book.origin`）。判据同 [ChangeBookSourceAdapter.CallBack.oldBookOrigin]。 */
-        val oldBookOrigin: String?
+        /** 某一行是不是当前正在使用的书源。契约同 [ChangeBookSourceAdapter.CallBack.isCurrentSource]。 */
+        fun isCurrentSource(searchBook: SearchBook): Boolean
         fun openToc(searchBook: SearchBook)
         fun topSource(searchBook: SearchBook)
         fun bottomSource(searchBook: SearchBook)

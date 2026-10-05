@@ -305,7 +305,7 @@ class ChangeChapterSourceDialog() : BaseDialogFragment(R.layout.dialog_chapter_c
 
     private fun scrollToDurSource() {
         searchBookAdapter.getItems().forEachIndexed { index, searchBook ->
-            if (searchBook.origin == oldBookOrigin) {
+            if (isCurrentSource(searchBook)) {
                 (binding.recyclerView.layoutManager as LinearLayoutManager)
                     .scrollToPositionWithOffset(index, 60.dpToPx())
                 return
@@ -332,12 +332,17 @@ class ChangeChapterSourceDialog() : BaseDialogFragment(R.layout.dialog_chapter_c
     }
 
     /**
-     * ⚠️ 「当前源」按 `origin` 判，不能按 `bookUrl`：10054 起换源走 `BookUpsert` 身份归并，
-     * `BookMergeRules.mergeInto` 保留旧记录的 `bookUrl` 只换 `origin`，
-     * 故合并后旧 `bookUrl` 与列表行的新源 URL 永不相等，勾会停在旧源那行。
+     * 判定某一行是不是当前正在使用的书源。口径与
+     * [ChangeBookSourceAdapter.CallBack.isCurrentSource] 一致：
+     * `origin` 圈定书源 + `tocUrl` 圈定该源里的具体哪一行。
      */
-    override val oldBookOrigin: String?
-        get() = callBack?.oldBook?.origin
+    override fun isCurrentSource(searchBook: SearchBook): Boolean {
+        val book = callBack?.oldBook ?: return false
+        if (book.origin != searchBook.origin) return false
+        val bookTocUrl = book.tocUrl
+        if (bookTocUrl.isBlank()) return true
+        return bookTocUrl == searchBook.tocUrl
+    }
 
     override fun topSource(searchBook: SearchBook) {
         viewModel.topSource(searchBook)
@@ -359,7 +364,7 @@ class ChangeChapterSourceDialog() : BaseDialogFragment(R.layout.dialog_chapter_c
 
     override fun deleteSource(searchBook: SearchBook) {
         viewModel.del(searchBook)
-        if (oldBookOrigin == searchBook.origin) {
+        if (isCurrentSource(searchBook)) {
             viewModel.autoChangeSource(callBack?.oldBook?.type) { book, toc, source ->
                 callBack?.changeTo(source, book, toc)
             }
@@ -414,7 +419,7 @@ class ChangeChapterSourceDialog() : BaseDialogFragment(R.layout.dialog_chapter_c
             searchBookAdapter.notifyItemRangeChanged(
                 0,
                 searchBookAdapter.itemCount,
-                bundleOf(Pair("upCurSource", oldBookOrigin))
+                bundleOf(Pair("upCurSource", true))
             )
         }
     }
