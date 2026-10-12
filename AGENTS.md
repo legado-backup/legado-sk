@@ -369,11 +369,32 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10082` 递增**（10081 为当前交付）。
+> **下一次交付 versionCode 从 `10087` 递增**（10086 为当前交付）。
 
 ---
 
-- ✅ **10081（`3.26.100515c`）——main 当前交付，✅ 已发布 Pre-release `v3.26.100515-10081`（2026-10-05）**（修复换源对话框「书源标记显示不正确」）：
+- ✅ **10086（`3.26.101215c`）——main 当前交付，⏳ 尚未发布 Release**（10083→10086 合并交付：听书「按章节定时」+ 音量增强改开关 + 朗读面板重排 + 停止残留修复）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。**交付物是 10086**；10083/10084/10085 均为本次迭代中间产物，无独立 Release。
+  - **① 听书「按章节定时」（10083）**：档位只有 **本章 / 3 章 / 5 章**（作者指示，**不要**加 10 章档）。语义 = 引擎**自然读完 N 章后停止，且停在读完那一章的末尾、不进入下一章**。
+    - ⚠️ **只消耗引擎自然推进**：`nextChapter(syncView)` 的拦截条件是 **`!syncView && timeChapter > 0`**；用户显式跳章（`syncView = true`）**既不消耗也不清零**。改成无条件递减会让手动翻页吃掉额度。
+    - ⚠️ **归零时必须 `return`**，且 `advanceToNextChapter` 必须在 `ReadAloud.stop(this)` **之后**（否则先进下一章再停）。
+    - ⚠️ **两种定时双向互斥**：`setTimer`/`addTimer` → `clearChapterTimer()`；`setChapterTimer` → `timeMinute = 0`。
+    - ⚠️ **会话内状态、不持久化**（无 `PreferKey`/`AppConfig` 键，勿加）；**`onCreate` 与 `onDestroy` 都必须清零**。
+    - ⚠️ **档位表 `BaseReadAloudService.chapterTimerOptions` 是唯一来源**，三个入口（面板快捷键 / 面板 `tvTimer` 选择器 / 听书页 `SliderPopup`）都必须消费它，**禁止各自内联 `intArrayOf(1,3,5)`**。
+    - 面板 `seekTimer.onProgressChanged` **必须**在 `chapterTimerRemainingText() != null` 时提前 `return`，否则章节文案被「0 分钟」覆盖。
+  - **② 音量增强：滑条 → 开关（10083）**：开 = 固定 **2 倍**（`VolumeGain.MAX_FACTOR = 2f`、`MAX_PERCENT = 100`），关 = 不增强。**上限刻意只到 2 倍**（2 倍以上必然削波破音，作者指示），**不要调回 5 倍**。`coerceIn` 顺带迁移历史 300/400 脏值。
+    - 删除 `QualityCost` / `qualityCostFor` / `DISTORTION_FACTOR`、滑条与加减按钮、`GAIN_STEP` 及逐档文案。
+  - **③ 朗读面板重排（10083/10085）**：`语速 <值> [跟随系统] …… [音量增强] ⓘ` **必须同一行**（`ll_tts_SpeechRate`）；标签用短文案；倍数与音质代价放 ⓘ 弹窗，**不要**再加常显提示控件（既挤行宽又是历史崩溃点）。
+  - **④ 修「停止朗读后残留『还剩 N 章』」（10086）**：`onDestroy` 原先只重置 `isRun`/`pause`/`loading`，**没清 `timeChapter`**。分钟定时看不出（面板回退显示持久化的 `AppConfig.ttsTimer`），章节定时**无持久化默认值** ⇒ 残留值成了唯一显示来源。修法：`onDestroy` 调 `clearChapterTimer()`。
+  - **回归锁**：`ReadAloudChapterTimerGuardTest`（**10 项**）、`ReadAloudVolumeGainHintTest`（`volumeGainIsASwitchEndToEnd` + `speedAndVolumeGainShareOneRow`）、`VolumeGainTest.ceilingIsExactlyTwoTimes`。⚠️ `app/build.gradle` 已声明 `dialog_read_aloud.xml` + 两个 `strings.xml` 为 Test 输入（否则只改资源会命中 build cache 假绿）。
+    - ⚠️ **本次两次踩到「无效断言」，都靠注入证伪才发现**：① **`indexOf` 序关系**——`clearAt < fillAt` 在删掉那行后 `indexOf` 返回 `-1` 而仍成立 ⇒ 必须写成 `clearAt >= 0 && fillAt >= 0 && clearAt < fillAt`；② **子串切片不认嵌套**——「起始标记 → 下一个任意标记」截取会把挪进后一个 LinearLayout 的控件也算作"同一行"⇒ 必须按该行自身闭合标签（8 空格缩进）截取。
+    - ⚠️ 另有**注入未命中**坑：PowerShell 单引号字符串里的 `` `n `` 是**字面量**不会换行，替换静默 no-op 却报"注入后仍全绿"，被误判成断言无效 ⇒ **注入后必须回显是否命中**。注入还**必须可编译**。
+  - **验证**：全量单测 **261 项 / 10 失败**（＝既有已知 10 项，**无新增**）。
+  - **实机回归**：手机 `72a2b362`（Redmi，10081→10086 覆盖升级，作者实测确认功能正常）；平板 `HA1KAPWG`（覆盖升级，0 崩溃）；模拟器完成 UI 结构回归（面板一行内 4 控件、ⓘ 弹窗文案、快捷键点击后 `tv_timer` 显示「还剩 1 章」、通知栏标题同步）。⚠️ **模拟器无系统 TTS 引擎**，"读完本章自动停"的端到端由作者真机确认。
+  - **产物**：正式版 36,169,704 字节（sha256 `44FC1AE0…`）＋ 共存版 36,169,219 字节（sha256 `F9EA6652…`）；均 `10086` / `3.26.101215c` / 阅读SK / arm64-v8a / 8 dex / 无 `debuggable` / apksigner exit 0。
+  - **下一次交付 versionCode 从 `10087` 递增。**
+
+- ✅ **10081（`3.26.100515c`）——历史交付，✅ 已发布 Pre-release `v3.26.100515-10081`（2026-10-05）**（修复换源对话框「书源标记显示不正确」）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。
   - **作者报的现场**：换源对话框里✓停在**曾经用过、但已不是当前源**的那一行；点它被判为「当前源」而拒绝换源，而实际在用的源反而没有标记。普通源与聚合源都会出现。
   - **根因（两级）**：
@@ -430,41 +451,6 @@ uiautomator2 / ADB
   - **产物**（重编后）：正式版 36,178,830 字节（sha256 `7a30b44d…`）＋ 共存版 36,178,814 字节（sha256 `6994d46c…`）；均 `10076` / `3.26.093012c` / 阅读SK / arm64-v8a / locales `'zh'` / 8 dex / 无 `debuggable` / apksigner exit 0（`79fef578…`）。
   - **下一次交付 versionCode 从 `10077` 递增。**
 
-- ✅ **10075（`3.26.092916c`）——历史交付，✅ 已发布 Pre-release `v3.26.092916-10075`（2026-09-29）**（10074+10075 合并交付：新增「恢复时按备份覆盖书架」+「书架变动时自动备份」）：
-  - 分支 **main**（提交 `64665ebd` / `120bcc16` / `9257bc3c` / `2cb89035`）。**无 DB 迁移**（版本仍 117）。
-  - ⚠️ **10074 从未单独发布 Release**（其自动备份实际不可用），已并入本版。**两个新开关默认都是关**（作者确认）：`autoBackupOnShelfChange`、`overwriteShelfOnRestore`。
-  - **改动一：恢复时按备份覆盖书架**（`64665ebd`）。开启后恢复会删掉「本机比备份多」的**在线书**。
-    - 判据抽 `help/book/ShelfIdentity.kt`：**搬** `ShelfCleanupRules.keyOf` 的 **trim** 口径（**不是重写**）。
-    - ⚠️ **判据必须 trim**：备份与本机书名/作者可能只在首尾空白上不同，不归一会把备份里确实存在的书误判为「本机多余」→ **删掉有阅读历史的那条**。`BookMergeRules.identityKeyOf` **刻意不 trim**，两者不可互相替代、不得合并。
-    - ⚠️ **三道守卫缺一即可能删光书架**：① `bookshelf.json` 不存在 ⇒ 拒绝删除（它与 `covers` 绑在同一「书架」可勾选项，取消勾选会让该文件不存在 ⇒ 备份在线书集合为空 ⇒ 全部−空 = 删光）；② 解析失败 ⇒ 拒绝删除（**禁止 `orEmpty()` 降级**）；③ 两侧集合都过滤离线书。
-    - ⚠️ **本机集合必须在 merge 之前取快照**（`localKeysBeforeMerge`）。⚠️ **删书放在恢复最末尾、DB 事务之外**（`RestoreJournal` 快照不含 `legado.db`）。删除前落清单 `filesDir/deleted-books-<ts>.json`。
-    - **回归锁**：`ShelfIdentityTest`（11 项）、`RestoreOverwriteGuardTest`（7 项），已双向证伪。
-  - **改动二：书架变动时自动备份**（`120bcc16`）。⚠️ **本版此前实际不可用，已由下述修复改好。**
-  - **改动三：移除「按备份清理本机书籍」入口**（`9257bc3c`）。判据语义未丢（已迁入 `ShelfIdentity`）。
-  - **修复（`2cb89035`）**：作者实机反馈 10074 的开关打开后增删书籍均无备份、云端看不到。查到**两个独立根因**，均已修。
-  - **根因一（致命）**：把「本地备份目录为空」误判成「没配置备份」而直接 `return`。
-    - ⚠️ `AppConfig.backupPath` **只是本地/SAF 目录**，与 WebDAV **完全无关**；WebDAV 由 `backup()` 内部的 `AppWebDav.backUpWebDav()` 独立完成。
-    - ⚠️ **手动备份**在同一值为空时的行为是**弹目录选择器**（`BackupConfigFragment.backup()`），**不是跳过** —— 这才是正确语义。自动备份无 UI 可弹，故为空时应**只跳过本地落盘、仍走 WebDAV**。
-    - 后果：**只配 WebDAV 的用户（最常见）自动备份永远静默不执行**。
-    - 现判据：本地与 WebDAV **都没配**才跳过；**字段命名是 `localPath`**（不是 `backupPath`），改这里别再退回「路径空即 return」。
-  - **根因二**：触发点只接了 `addBookByUrl` 一条路径，**所有删除路径都没接**。
-    - 接在**领域方法**收口，不再逐条接 UI 入口（必然漏）：`Book.save()`（覆盖全部加架路径）、`Book.delete()` + `BookShortcutHelp.delete()`（覆盖全部删除路径）。
-    - ⚠️ **这两个接缝天然排除恢复流程**：`Restore` 全程走 `bookDao.insert/update` 原始调用、**不经过** `save()`/`delete()`，故无需额外排除条件。
-    - ⚠️ `BookshelfViewModel.notifyShelfMaybeChanged()` **已删除**（旧设计的临时触发入口）。
-  - **新增**：备份成功后 **0.5 秒一闪提示**（`toastOnUiBrief`，复用主题化 Toast）。
-    - ⚠️ **`Toast.setDuration` 只认 `LENGTH_SHORT`(0) / `LENGTH_LONG`(1)，传毫秒无效**（系统按未知常量落回 SHORT≈2s，且受无障碍设置影响）。故 `toastOnUiBrief` 是「按 SHORT 显示 + 到点主动 `cancel()`」实现。
-  - **回归锁**：`AutoBackupOnShelfChangeGuardTest`（7→**9** 项）。**四项已双向证伪**：本地路径空即 return → `doesNotTreatMissingLocalPathAsUnconfigured` 失败；摘掉提示 → `showsBriefToastAfterSuccessfulAutoBackup` 失败；摘掉删除漏斗触发 → `triggerIsOnDomainMethodsNotDao` 失败；把提示移到备份之前 → `showsBriefToastAfterSuccessfulAutoBackup` 失败。
-    - ⚠️ 写这类断言时**观测窗口要精确**：初版把「WebDAV 判据之前不许有 return」的范围开得过大，把方法开头合法的 `Restore.isRestoring` 守卫也算进去 → **代码正确却报错**。现只观测「决定哪里有处可写」那一小段。
-  - **验证**：全量单测 **238 项 / 10 失败**（10 项＝既有已知失败 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增失败**）。
-  - **实机（两台，`io.legado.app.sk2` 10074 → 10075 覆盖安装保数据）**：
-    - 手机 `72a2b362`：`firstInstallTime` 保持 `2026-09-21 16:12:52`、`ceDataInode` `820249` 未变；pid 存活；`logcat -b crash` 0 条。
-    - 平板 `HA1KAPWG`：`firstInstallTime` 保持 `2026-09-21 13:08:56`；pid 存活；`logcat -b crash` 0 条。
-    - ⚠️ **界面/功能验证由作者完成**（作者要求：AI 只装实机、不做模拟器测试）。**未做任何改动数据的操作**。
-  - **产物**（同版本号、同签名、仅包名不同）：`release/legado_sk_3.26.092916c_10075_arm64-v8a.apk`（36,178,675 字节，`io.legado.app.c`，sha256 `A5B7B6D9…`）＋ `release/legado_sk_3.26.092916c_10075_arm64-v8a_（共存版）.apk`（36,178,718 字节，`io.legado.app.sk2`，sha256 `C3A40022…`）。
-    - aapt 均 `10075` / `3.26.092916c` / 阅读SK / arm64-v8a / locales `'zh'`；`debuggable` 无输出；`classes*.dex` 均 **8** 个；apksigner exit 0（证书 SHA-256 `79fef578…`）。`release/legado-sk-arm64-v8a.apk`（固定名）已更新为 10075 正式版。
-  - **下一次交付 versionCode 从 `10076` 递增。**
-  - ⚠️ **验证共存版 APK 时注意**：`apksigner.bat` 传含 `（共存版）` 的路径会因批处理按 OEM 代码页解析参数而报「找不到文件」（**不是签名问题**）。绕法：先复制成 ASCII 名再验（`java -jar apksigner.jar` 直调同样会中招）。
-
 ## 7. 当前机器环境与配套文档（2026-09-04 迁移后）
 
 > 迁移后的电脑为全新环境：无 D 盘，原先 `D:\code\...`、`D:\OneDrive\桌面\Ai\legado-sk\`、`F:\leidian\LDPlayer14`、`F:\down\雷电模拟器14...` 均已失效或弃用。本节统一登记本机事实；若某条与实际不符，先核实再改，勿让 AGENTS 出现悬空路径。
@@ -492,6 +478,7 @@ shell 选择：默认 Git Bash（POSIX）；原生 Windows 工具 / `.ps1` / 需
 - `companion\项目文档.md` —— 项目概览 + **§2.1 版本索引**（一屏全貌 + 版本定性；逐版细节在下一份）。
 - `companion\发布版更新记录.md` —— **版本事实的唯一权威来源**：§0 防改错速查 / §1 逐版净增量 / §2 功能→版本反查表。
 - `companion\发布版更新原文-releasenotes.md` —— GitHub Releases 逐版作者原文全文（备份至 10037，可 grep）。
+- `companion\发布说明-<versionCode>.md` —— 逐版 GitHub Release 发布说明草稿（本地文件名对应版本号，如 `发布说明-10086.md`）；发布前照此写 `gh release create --notes-file`。⚠️ 资产名用 ASCII 后缀 `_sk2-coexist`。
 - `companion\基底重植方法论与10036记录.md` —— **基底重植方法论**（新枝重植怎么做、通用移植原则）+ **⭐ 重植完整性核查方法**（§2，下次重植必跑）+ 10036 那次重植的定性。⚠️ **不是待执行方案**，其中的逐项移植清单已删除（行号已过期）。
 
 **已确认不存在、且不再计划创建的配套文档**（历史上有引用，2026-09-29 清理时核对：这些文件从未存在过，**不要按旧引用去找**）：
