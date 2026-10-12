@@ -385,7 +385,8 @@ uiautomator2 / ADB
   - **② 音量增强：滑条 → 开关（10083）**：开 = 固定 **2 倍**（`VolumeGain.MAX_FACTOR = 2f`、`MAX_PERCENT = 100`），关 = 不增强。**上限刻意只到 2 倍**（2 倍以上必然削波破音，作者指示），**不要调回 5 倍**。`coerceIn` 顺带迁移历史 300/400 脏值。
     - 删除 `QualityCost` / `qualityCostFor` / `DISTORTION_FACTOR`、滑条与加减按钮、`GAIN_STEP` 及逐档文案。
   - **③ 朗读面板重排（10083/10085）**：`语速 <值> [跟随系统] …… [音量增强] ⓘ` **必须同一行**（`ll_tts_SpeechRate`）；标签用短文案；倍数与音质代价放 ⓘ 弹窗，**不要**再加常显提示控件（既挤行宽又是历史崩溃点）。
-  - **④ 修「停止朗读后残留『还剩 N 章』」（10086）**：`onDestroy` 原先只重置 `isRun`/`pause`/`loading`，**没清 `timeChapter`**。分钟定时看不出（面板回退显示持久化的 `AppConfig.ttsTimer`），章节定时**无持久化默认值** ⇒ 残留值成了唯一显示来源。修法：`onDestroy` 调 `clearChapterTimer()`。
+  - **④ `onDestroy` 清章节定时（10086）**：`onDestroy` 原先只重置 `isRun`/`pause`/`loading`，**没清 `timeChapter`**。分钟定时看不出（面板回退显示持久化的 `AppConfig.ttsTimer`），章节定时**无持久化默认值** ⇒ 残留值成了唯一显示来源，表现为「停止朗读后面板/通知栏仍显示『还剩 N 章』」。
+    - ⚠️ **这是开发期（10083~10085 中间构建）自查出的缺陷，从未出现在任何发布版中**，故**不写进发布说明**；但代码修复与回归锁必须保留（章节定时一旦进入正式版，这就是真实回归点）。修法：`onDestroy` 调 `clearChapterTimer()`。
   - **回归锁**：`ReadAloudChapterTimerGuardTest`（**10 项**）、`ReadAloudVolumeGainHintTest`（`volumeGainIsASwitchEndToEnd` + `speedAndVolumeGainShareOneRow`）、`VolumeGainTest.ceilingIsExactlyTwoTimes`。⚠️ `app/build.gradle` 已声明 `dialog_read_aloud.xml` + 两个 `strings.xml` 为 Test 输入（否则只改资源会命中 build cache 假绿）。
     - ⚠️ **本次两次踩到「无效断言」，都靠注入证伪才发现**：① **`indexOf` 序关系**——`clearAt < fillAt` 在删掉那行后 `indexOf` 返回 `-1` 而仍成立 ⇒ 必须写成 `clearAt >= 0 && fillAt >= 0 && clearAt < fillAt`；② **子串切片不认嵌套**——「起始标记 → 下一个任意标记」截取会把挪进后一个 LinearLayout 的控件也算作"同一行"⇒ 必须按该行自身闭合标签（8 空格缩进）截取。
     - ⚠️ 另有**注入未命中**坑：PowerShell 单引号字符串里的 `` `n `` 是**字面量**不会换行，替换静默 no-op 却报"注入后仍全绿"，被误判成断言无效 ⇒ **注入后必须回显是否命中**。注入还**必须可编译**。
