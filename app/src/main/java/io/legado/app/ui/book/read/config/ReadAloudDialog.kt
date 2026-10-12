@@ -173,12 +173,12 @@ class ReadAloudDialog : BaseReaderSheetDialogFragment(R.layout.dialog_read_aloud
             tvTtsSpeed.setTextColor(palette.secondaryTextColor)
             tvTtsSpeedValue.setTextColor(textColor)
             ivTtsSpeechAdd.setColorFilter(textColor)
-            tvTtsVolumeGain.setTextColor(palette.secondaryTextColor)
-            tvTtsVolumeGainValue.setTextColor(textColor)
-            ivVolumeGainReduce.setColorFilter(textColor)
-            ivVolumeGainAdd.setColorFilter(textColor)
+            cbVolumeGain.setTextColor(textColor)
             ivVolumeGainHelp.setColorFilter(palette.secondaryTextColor)
             tvVolumeGainHint.setTextColor(palette.secondaryTextColor)
+            tvTimerChapterCurrent.setTextColor(textColor)
+            tvTimerChapter3.setTextColor(textColor)
+            tvTimerChapter5.setTextColor(textColor)
             ivCatalog.setColorFilter(textColor)
             tvCatalog.setTextColor(textColor)
             tvCatalogValue.setTextColor(textColor)
@@ -205,23 +205,40 @@ class ReadAloudDialog : BaseReaderSheetDialogFragment(R.layout.dialog_read_aloud
     }
 
     /**
-     * 定时档位：分钟（0=关闭）+ 章节（本章/3章/5章）。
+     * 定时档位：章节（本章/3章/5章）+ 分钟（0=关闭）。
+     * 章节档排在**前面**：分钟档有 8 项，排后面才能一眼看到新增的按章节定时。
      * 两种定时互斥，由服务侧 setTimer/setChapterTimer 统一清理另一模式。
      */
     private fun showTimerSelector() {
+        val chapterOptions = BaseReadAloudService.chapterTimerOptions
         val minuteOptions = intArrayOf(0, 5, 10, 15, 30, 60, 90, 180)
-        val chapterOptions = intArrayOf(1, 3, 5)
-        val labels = minuteOptions.map { "$it 分钟" } +
-            chapterOptions.map { BaseReadAloudService.chapterTimerOptionText(it) }
+        val labels = chapterOptions.map { BaseReadAloudService.chapterTimerOptionText(it) } +
+            minuteOptions.map { "$it 分钟" }
         context?.selector("设定时间", labels) { _, index ->
             val ctx = requireContext()
-            if (index < minuteOptions.size) {
-                ReadAloud.setTimer(ctx, minuteOptions[index])
+            if (index < chapterOptions.size) {
+                ReadAloud.setChapterTimer(ctx, chapterOptions[index])
             } else {
-                ReadAloud.setChapterTimer(ctx, chapterOptions[index - minuteOptions.size])
+                ReadAloud.setTimer(ctx, minuteOptions[index - chapterOptions.size])
             }
         }
     }
+
+    /**
+     * 章节定时快捷档（本章/3章/5章）：直接摆在定时行下方，与 `tvTimer` 的选择器同源同文案。
+     * 引擎未运行时 `ReadAloud.setChapterTimer` 是空操作，故未朗读时点击无效果。
+     */
+    private fun bindChapterTimerButtons() = binding.run {
+        val views = arrayOf(tvTimerChapterCurrent, tvTimerChapter3, tvTimerChapter5)
+        views.forEachIndexed { index, view ->
+            val count = BaseReadAloudService.chapterTimerOptions[index]
+            view.text = BaseReadAloudService.chapterTimerOptionText(count)
+            view.setOnClickListener {
+                ReadAloud.setChapterTimer(requireContext(), count)
+            }
+        }
+    }
+
     private fun initEvent() = binding.run {
         ivCatalog.gone()
         llMainMenu.visible(AppConfig.readAloudHideFloatingWindow && BaseReadAloudService.isRun)
@@ -300,6 +317,7 @@ class ReadAloudDialog : BaseReaderSheetDialogFragment(R.layout.dialog_read_aloud
         tvTimer.setOnClickListener {
             showTimerSelector()
         }
+        bindChapterTimerButtons()
         seekTtsSpeechRate.setOnSeekBarChangeListener(object : SeekBarChangeListener {
 
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
@@ -312,31 +330,12 @@ class ReadAloudDialog : BaseReaderSheetDialogFragment(R.layout.dialog_read_aloud
                 upTtsSpeechRate()
             }
         })
-        ivVolumeGainReduce.setOnClickListener {
-            seekVolumeGain.progress -= 1
-            saveVolumeGain(seekVolumeGain.progress)
-        }
-        ivVolumeGainAdd.setOnClickListener {
-            seekVolumeGain.progress += 1
-            saveVolumeGain(seekVolumeGain.progress)
-        }
         ivVolumeGainHelp.setOnClickListener {
             context?.alert(
                 R.string.read_aloud_volume_gain,
                 R.string.read_aloud_volume_gain_hint
             )
         }
-        seekVolumeGain.setOnSeekBarChangeListener(object : SeekBarChangeListener {
-
-            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                super.onProgressChanged(seekBar, progress, fromUser)
-                upVolumeGainText(progress)
-            }
-
-            override fun onStopTrackingTouch(seekBar: SeekBar) {
-                saveVolumeGain(seekBar.progress)
-            }
-        })
         seekTimer.setOnSeekBarChangeListener(object : SeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                 // 章节定时激活时滑条是被程序归零的（timeMinute=0），此时不得用分钟
@@ -555,34 +554,29 @@ class ReadAloudDialog : BaseReaderSheetDialogFragment(R.layout.dialog_read_aloud
     }
 
     /**
-     * 音量增强为播放端增益（PCM 乘系数），由朗读服务在每次播放新音频时读取设置，
-     * 因此这里只需落盘，无需通知服务。滑条最小位表示"不增强"，不会把音量调小。
+     * 音量增强 = 开关（开 = 固定 [VolumeGain.MAX_PERCENT]，即 2 倍；关 = 不增强）。
+     *
+     * 增益是播放端 PCM 乘系数，由朗读服务在每次播放新音频时读取设置，故这里只需落盘，
+     * 无需通知服务。仅两档：更高倍数是纯数字放大，只会削波失真。
      */
     private fun bindVolumeGainControls() = binding.run {
-        seekVolumeGain.max = VolumeGain.MAX_PERCENT / GAIN_STEP
-        seekVolumeGain.progress = AppConfig.ttsVolumeGain / GAIN_STEP
-        upVolumeGainText(seekVolumeGain.progress)
-    }
-
-    @SuppressLint("SetTextI18n")
-    private fun upVolumeGainText(value: Int) {
-        val percent = value * GAIN_STEP
-        // 文案映射留在 UI 层：help/exoplayer 包不依赖 R，也不承载展示文案。
-        binding.tvTtsVolumeGainValue.text = when {
-            VolumeGain.factorFor(percent) == 1f -> getString(R.string.read_aloud_volume_gain_none)
-            else -> "%.1fX".format(VolumeGain.factorFor(percent))
-        }
-        // ⚠️ 无提示档必须赋 CharSequence 空串：TextView.setText(Int) 走的是**字符串资源 id**，
-        // 传 0 会抛 Resources$NotFoundException: String resource ID #0x0（已实机崩溃过一次）。
-        binding.tvVolumeGainHint.text = when (VolumeGain.qualityCostFor(percent)) {
-            VolumeGain.QualityCost.NONE -> ""
-            VolumeGain.QualityCost.MILD -> getString(R.string.read_aloud_volume_gain_mild)
-            VolumeGain.QualityCost.DISTORTION -> getString(R.string.read_aloud_volume_gain_strong)
+        cbVolumeGain.setOnCheckedChangeListener(null)
+        cbVolumeGain.isChecked = AppConfig.ttsVolumeGain > 0
+        upVolumeGainHint(cbVolumeGain.isChecked)
+        cbVolumeGain.setOnCheckedChangeListener { _, isChecked ->
+            AppConfig.ttsVolumeGain = if (isChecked) VolumeGain.MAX_PERCENT else 0
+            upVolumeGainHint(isChecked)
         }
     }
 
-    private fun saveVolumeGain(value: Int) {
-        AppConfig.ttsVolumeGain = value * GAIN_STEP
+    /**
+     * 开启时如实说明音质代价（2 倍已在削波边缘）；关闭时不提示。
+     * ⚠️ 必须赋 CharSequence：`TextView.setText(Int)` 的参数是**字符串资源 id**，
+     * 传 0 会抛 `Resources$NotFoundException: String resource ID #0x0`（已实机崩溃过一次）。
+     */
+    private fun upVolumeGainHint(enabled: Boolean) {
+        binding.tvVolumeGainHint.text =
+            if (enabled) getString(R.string.read_aloud_volume_gain_on) else ""
     }
 
     private fun configureSpeechRateSlider() = binding.seekTtsSpeechRate.run {
@@ -691,10 +685,5 @@ class ReadAloudDialog : BaseReaderSheetDialogFragment(R.layout.dialog_read_aloud
     interface CallBack {
         fun showMenuBar()
         fun onClickReadAloud()
-    }
-
-    private companion object {
-        /** 滑条每格对应的增益百分比：40 格覆盖上限 400%。 */
-        const val GAIN_STEP = 10
     }
 }

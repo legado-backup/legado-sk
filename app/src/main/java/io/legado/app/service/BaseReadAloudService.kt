@@ -128,6 +128,9 @@ abstract class BaseReadAloudService : BaseService(),
         var timeChapter: Int = 0
             private set
 
+        /** 章节定时的档位（本章/3章/5章）：面板、听书页弹窗与选择器共用，防止三处漂移。 */
+        val chapterTimerOptions: IntArray = intArrayOf(1, 3, 5)
+
         /** 章节定时剩余章数文案；未启用返回 null（调用方回退分钟显示）。 */
         fun chapterTimerRemainingText(): String? =
             timeChapter.takeIf { it > 0 }?.let { appCtx.getString(R.string.timer_chapter, it) }

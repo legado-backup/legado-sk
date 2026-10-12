@@ -218,6 +218,10 @@ android {
         inputs.file("src/main/res/menu/book_read.xml")
                 .withPropertyName("cloudProgressMenuXml")
                 .withPathSensitivity(PathSensitivity.RELATIVE)
+        // ReadAloudVolumeGainHintTest 断言朗读面板布局（音量增强开关、旧滑条已移除）。
+        inputs.file("src/main/res/layout/dialog_read_aloud.xml")
+                .withPropertyName("readAloudLayoutXml")
+                .withPathSensitivity(PathSensitivity.RELATIVE)
         // ChangeSourceCurrentRowGuardTest 断言换源适配器与其字符串资源。
         // 资源不进 JVM 单测 classpath（只编成 R 里的 int id，内容变化不改任何 class 字节），
         // 不声明就会在「只改 xml/字符串、不改 .kt」时命中 build cache 复用旧结果。

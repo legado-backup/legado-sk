@@ -1045,9 +1045,10 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
     const val defaultVolumeGain = 0
 
     /**
-     * 朗读音量增强百分比：0=不增强，100=2 倍，上限 [VolumeGain.MAX_PERCENT]。
+     * 朗读音量增强百分比：0=不增强，100=2 倍（UI 上就是「音量增强」开关的关/开两档）。
      * 读写时同步刷新 [VolumeGain.currentFactor]，播放线程只读该 volatile 缓存，
      * 避免在音频线程上访问 SharedPreferences（锁 + 装箱）。
+     * 上限收敛同时承担历史脏值（早期曾存到 400）的迁移。
      */
     var ttsVolumeGain: Int
         get() = appCtx.getPrefInt(PreferKey.ttsVolumeGain, defaultVolumeGain)

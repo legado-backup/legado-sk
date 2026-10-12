@@ -175,40 +175,92 @@
 
     </LinearLayout>
 
+    <!-- 定时：分钟滑条 + 按章节快捷档（与听书页弹窗共用 chapterTimerOptionText 档位文案） -->
     <LinearLayout
         android:id="@+id/panel_timer"
         android:layout_width="match_parent"
-        android:layout_height="42dp"
-        android:gravity="center"
-        android:orientation="horizontal"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
         android:paddingStart="6dp"
         android:paddingEnd="6dp">
 
-        <androidx.appcompat.widget.AppCompatImageView
-            android:id="@+id/iv_timer"
-            android:layout_width="30dp"
-            android:layout_height="30dp"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/set_timer"
-            android:src="@drawable/ic_time_add_24dp"
-            android:tint="@color/primaryText"
-            android:tooltipText="@string/set_timer"
-            tools:ignore="UnusedAttribute" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:gravity="center"
+            android:orientation="horizontal">
 
-        <io.legado.app.lib.theme.view.ThemeSeekBar
-            android:id="@+id/seek_timer"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:max="180" />
+            <androidx.appcompat.widget.AppCompatImageView
+                android:id="@+id/iv_timer"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/set_timer"
+                android:src="@drawable/ic_time_add_24dp"
+                android:tint="@color/primaryText"
+                android:tooltipText="@string/set_timer"
+                tools:ignore="UnusedAttribute" />
 
-        <TextView
-            android:id="@+id/tv_timer"
-            android:layout_width="wrap_content"
+            <io.legado.app.lib.theme.view.ThemeSeekBar
+                android:id="@+id/seek_timer"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:max="180" />
+
+            <TextView
+                android:id="@+id/tv_timer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:text="@string/timer_m"
+                android:textColor="@color/primaryText" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:text="@string/timer_m"
-            android:textColor="@color/primaryText" />
+            android:orientation="horizontal"
+            android:paddingBottom="6dp">
+
+            <TextView
+                android:id="@+id/tv_timer_chapter_current"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:gravity="center"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:textColor="@color/primaryText"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/tv_timer_chapter_3"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:gravity="center"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:textColor="@color/primaryText"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/tv_timer_chapter_5"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:gravity="center"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:textColor="@color/primaryText"
+                android:textSize="13sp" />
+
+        </LinearLayout>
 
     </LinearLayout>
 
@@ -300,6 +352,10 @@
 
         </LinearLayout>
 
+        <!--
+          音量增强：开关 + 固定 2 倍。滑条已移除 —— 2 倍以上是纯数字放大，
+          大声处必然削波失真，再高的档位没有使用价值，只留「开 / 关」两个状态。
+        -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="42dp"
@@ -308,12 +364,13 @@
             android:paddingStart="8dp"
             android:paddingEnd="8dp">
 
-            <TextView
-                android:id="@+id/tv_tts_volume_gain"
+            <io.legado.app.lib.theme.view.ThemeSwitch
+                android:id="@+id/cb_volume_gain"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
                 android:text="@string/read_aloud_volume_gain"
-                android:textSize="14sp" />
+                tools:ignore="TouchTargetSizeCheck" />
 
             <androidx.appcompat.widget.AppCompatImageView
                 android:id="@+id/iv_volume_gain_help"
@@ -329,13 +386,6 @@
                 tools:ignore="UnusedAttribute" />
 
             <TextView
-                android:id="@+id/tv_tts_volume_gain_value"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingHorizontal="3dp"
-                android:textSize="14sp" />
-
-            <TextView
                 android:id="@+id/tv_volume_gain_hint"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -344,43 +394,6 @@
                 android:gravity="end"
                 android:maxLines="1"
                 android:textSize="12sp" />
-
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center"
-            android:orientation="horizontal"
-            android:paddingLeft="6dp"
-            android:paddingRight="6dp">
-
-            <androidx.appcompat.widget.AppCompatImageView
-                android:id="@+id/iv_volume_gain_reduce"
-                android:layout_width="30dp"
-                android:layout_height="30dp"
-                android:contentDescription="@string/tts_volume_gain_reduce"
-                android:src="@drawable/ic_reduce"
-                android:tint="@color/primaryText"
-                android:tooltipText="@string/tts_volume_gain_reduce"
-                tools:ignore="UnusedAttribute" />
-
-            <io.legado.app.lib.theme.view.ThemeSeekBar
-                android:id="@+id/seek_volume_gain"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:max="40" />
-
-            <androidx.appcompat.widget.AppCompatImageView
-                android:id="@+id/iv_volume_gain_add"
-                android:layout_width="30dp"
-                android:layout_height="30dp"
-                android:contentDescription="@string/tts_volume_gain_add"
-                android:src="@drawable/ic_add"
-                android:tint="@color/primaryText"
-                android:tooltipText="@string/tts_volume_gain_add"
-                tools:ignore="UnusedAttribute" />
 
         </LinearLayout>
 

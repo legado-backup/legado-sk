@@ -93,7 +93,7 @@ class SliderPopup(
     private fun bindChapterOptions() {
         if (name != TIMER) return
         binding.llChapterOptions.visible()
-        val chapters = intArrayOf(1, 3, 5)
+        val chapters = BaseReadAloudService.chapterTimerOptions
         val views = arrayOf(binding.tvChapterCurrent, binding.tvChapter3, binding.tvChapter5)
         views.forEachIndexed { index, view ->
             val count = chapters[index]

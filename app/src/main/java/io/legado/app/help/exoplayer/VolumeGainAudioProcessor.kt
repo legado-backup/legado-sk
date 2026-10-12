@@ -89,43 +89,25 @@ class VolumeGainAudioProcessor(
 /**
  * 音量增强的取值与换算唯一入口。
  *
- * 设置值是「增强百分比」：`0` = 不增强（增益 1.0x），上限 [MAX_PERCENT] = 5.0x。
- * 最小位刻意不做衰减（因子不会小于 1）：音量偏小才是待解决的问题，滑条只负责变大。
+ * 设置值是「增强百分比」：`0` = 不增强（增益 1.0x），上限 [MAX_PERCENT] = 2.0x。
+ * 刻意不做衰减（因子不会小于 1）：音量偏小才是待解决的问题，只负责变大。
+ *
+ * ⚠️ 上限就是 2 倍（= 开关的「开」档），不再提供更高档位：2 倍以上是纯数字放大，
+ * 大声处必然削波破音，没有可用价值。`coerceIn(0, MAX_PERCENT)` 同时承担**历史脏值收敛**：
+ * 早期版本存过 300/400 的用户，读取时即回到 2 倍，不需要额外迁移代码。
  */
 object VolumeGain {
 
-    /** 增益上限倍数：纯数字放大，超过约 2x 后大声处会削波失真，5x 用于覆盖极低音量音源。 */
-    const val MAX_FACTOR = 5f
+    /** 增益上限倍数 = 开关档位。 */
+    const val MAX_FACTOR = 2f
 
-    /** 设置项上限（百分比）。 */
+    /** 设置项上限（百分比）＝开关打开时写入的值。 */
     const val MAX_PERCENT = ((MAX_FACTOR - 1f) * 100).toInt()
 
     /** 把百分比设置值换算为线性增益系数，入参越界会被收敛到有效区间。 */
     fun factorFor(percent: Int): Float {
         if (percent <= 0) return 1f
         return 1f + percent.coerceAtMost(MAX_PERCENT) / 100f
-    }
-
-    /** 超过该倍数后大声处开始削波，听感上就是失真。 */
-    const val DISTORTION_FACTOR = 2f
-
-    /**
-     * 当前档位的音质代价等级。
-     *
-     * 数字增益的代价是物理性的：把解码后的 PCM 乘大，超过采样上限的样本只能夹到边界，
-     * 表现为大声处失真（破音），音源本身越接近满刻度越明显。这不是缺陷，
-     * 因此不隐藏代价，而是按档位如实说明——具体文案由 UI 层决定。
-     */
-    enum class QualityCost { NONE, MILD, DISTORTION }
-
-    /** 由增益值判定音质代价等级；[QualityCost.NONE] 表示该档位无需提示。 */
-    fun qualityCostFor(percent: Int): QualityCost {
-        val factor = factorFor(percent)
-        return when {
-            factor == 1f -> QualityCost.NONE
-            factor > DISTORTION_FACTOR -> QualityCost.DISTORTION
-            else -> QualityCost.MILD
-        }
     }
 
     /**

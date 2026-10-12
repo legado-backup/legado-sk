@@ -126,21 +126,52 @@ class ReadAloudChapterTimerGuardTest {
         )
     }
 
-    /** 两个设置入口（阅读面板选择器、听书页快捷档）都必须提供本章/3章/5章并派发命令。 */
+    /**
+     * 档位表只能有**一份**（`BaseReadAloudService.chapterTimerOptions`），三个入口都消费它。
+     * 断言逐入口锚定「消费档位表 + 派发 setChapterTimer」，避免某处偷偷写死别的档位而漂移。
+     */
     @Test
-    fun bothSurfacesExposeChapterOptions() {
+    fun everyChapterTimerSurfaceConsumesTheSharedOptions() {
+        val service = serviceSource()
+        val options = slice(service, "val chapterTimerOptions", "intArrayOf(1, 3, 5)")
+        assertTrue("档位表必须集中在 BaseReadAloudService", options.contains("intArrayOf(1, 3, 5)"))
+
         val dialog = executableOnly(
             moduleSource("src/main/java/io/legado/app/ui/book/read/config/ReadAloudDialog.kt")
         )
+        // 入口一：定时行选择器
         val selector = slice(dialog, "private fun showTimerSelector()", "ReadAloud.setChapterTimer")
-        assertTrue("面板档位必须是本章/3章/5章", selector.contains("intArrayOf(1, 3, 5)"))
-        assertTrue("面板必须派发 setChapterTimer", selector.contains("ReadAloud.setChapterTimer"))
+        assertTrue("选择器必须使用共享档位表", selector.contains("chapterTimerOptions"))
+        assertTrue("选择器必须派发 setChapterTimer", selector.contains("ReadAloud.setChapterTimer"))
+        // 入口二：定时行下方的三个快捷档按钮
+        val buttons = slice(
+            dialog,
+            "private fun bindChapterTimerButtons()",
+            "ReadAloud.setChapterTimer"
+        )
+        for (view in listOf("tvTimerChapterCurrent", "tvTimerChapter3", "tvTimerChapter5")) {
+            assertTrue("快捷档必须绑定 $view", buttons.contains(view))
+        }
+        assertTrue("快捷档必须使用共享档位表", buttons.contains("chapterTimerOptions"))
+        // 只绑定不接线是死按钮：必须真的挂在 initEvent 里
+        val source = executableOnly(
+            moduleSource("src/main/java/io/legado/app/ui/book/read/config/ReadAloudDialog.kt")
+        )
+        val initEvent = slice(
+            source,
+            "private fun initEvent()",
+            "seekTtsSpeechRate.setOnSeekBarChangeListener"
+        )
+        assertTrue(
+            "bindChapterTimerButtons 必须在 initEvent 中被调用，否则快捷键既无文案也点不动",
+            initEvent.contains("bindChapterTimerButtons()")
+        )
 
         val popup = executableOnly(
             moduleSource("src/main/java/io/legado/app/ui/book/audio/SliderPopup.kt")
         )
         val quickPick = slice(popup, "private fun bindChapterOptions()", "dismiss()")
-        assertTrue("听书页快捷档必须是本章/3章/5章", quickPick.contains("intArrayOf(1, 3, 5)"))
+        assertTrue("听书页快捷档必须使用共享档位表", quickPick.contains("chapterTimerOptions"))
         assertTrue("听书页必须派发 setChapterTimer", quickPick.contains("ReadAloud.setChapterTimer"))
         assertTrue(
             "章节快捷档只能是 TIMER 模式（倍速弹窗不得出现）",
@@ -241,6 +272,30 @@ class ReadAloudChapterTimerGuardTest {
                 "timer_chapter_m",
                 "timer_chapter"
             )) {
+                assertTrue("$path 缺少字符串 $name", strings.contains("name=\"$name\""))
+            }
+        }
+    }
+
+    /**
+     * 音量增强提示文案必须真的挂在开关上（声明了字符串但代码不用，只查 strings.xml 是查不出来的）。
+     */
+    @Test
+    fun volumeGainSwitchStringsAreUsed() {
+        val dialog = executableOnly(
+            moduleSource("src/main/java/io/legado/app/ui/book/read/config/ReadAloudDialog.kt")
+        )
+        val hint = slice(dialog, "private fun upVolumeGainHint", "R.string.read_aloud_volume_gain_on")
+        assertTrue(
+            "开启提示必须使用 read_aloud_volume_gain_on",
+            hint.contains("R.string.read_aloud_volume_gain_on")
+        )
+        for (path in listOf(
+            "src/main/res/values/strings.xml",
+            "src/main/res/values-zh/strings.xml"
+        )) {
+            val strings = moduleSource(path)
+            for (name in listOf("read_aloud_volume_gain", "read_aloud_volume_gain_on")) {
                 assertTrue("$path 缺少字符串 $name", strings.contains("name=\"$name\""))
             }
         }
