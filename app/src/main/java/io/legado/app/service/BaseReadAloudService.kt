@@ -119,6 +119,27 @@ abstract class BaseReadAloudService : BaseService(),
         var timeMinute: Int = 0
             private set
 
+        /**
+         * 按章节定时：剩余章数，0=未启用。与 [timeMinute] 互斥（设定任一种即清另一种）。
+         * 只在引擎自然读完一章（`nextChapter(syncView = false)`）时递减，用户显式跳章不消耗；
+         * 归零时停止朗读且**不再推进到下一章**（即停在读完的那一章末尾）。
+         */
+        @JvmStatic
+        var timeChapter: Int = 0
+            private set
+
+        /** 章节定时剩余章数文案；未启用返回 null（调用方回退分钟显示）。 */
+        fun chapterTimerRemainingText(): String? =
+            timeChapter.takeIf { it > 0 }?.let { appCtx.getString(R.string.timer_chapter, it) }
+
+        /** 章节定时的档位文案（选择器/快捷档共用）。 */
+        fun chapterTimerOptionText(count: Int): String =
+            if (count <= 1) {
+                appCtx.getString(R.string.timer_chapter_current)
+            } else {
+                appCtx.getString(R.string.timer_chapter_m, count)
+            }
+
         @JvmStatic
         var runningClass: Class<*>? = null
             private set
@@ -835,6 +856,8 @@ abstract class BaseReadAloudService : BaseService(),
         application.registerActivityLifecycleCallbacks(appFloatingLifecycleCallbacks)
         appFloatingActivity = ReadBookActivity.activeActivity()
         upMediaSessionPlaybackState(PlaybackStateCompat.STATE_PLAYING)
+        // 按章节定时是会话内一次性设定（不持久化）：服务每次启动都从关闭开始。
+        timeChapter = 0
         setTimer(AppConfig.ttsTimer)
         showReadAloudFloatingWindow()
         if (AppConfig.ttsTimer > 0) {
@@ -1074,6 +1097,9 @@ abstract class BaseReadAloudService : BaseService(),
             IntentAction.next -> nextChapter(intent.getBooleanExtra("syncView", false))
             IntentAction.addTimer -> addTimer()
             IntentAction.setTimer -> setTimer(intent.getIntExtra("minute", 0))
+            IntentAction.setChapterTimer -> setChapterTimer(
+                intent.getIntExtra("chapterCount", 0)
+            )
             IntentAction.stop -> stopSelf()
         }
         return super.onStartCommand(intent, flags, startId)
@@ -1498,7 +1524,28 @@ abstract class BaseReadAloudService : BaseService(),
 
     private fun setTimer(minute: Int) {
         timeMinute = minute
+        // 两种定时互斥：设定分钟定时即清空章节定时，避免两个倒计时同时生效。
+        clearChapterTimer()
         doDs()
+    }
+
+    /**
+     * 按章节定时：引擎自然读完 [count] 章后停止（当前章算第 1 章）。count<=0 等价于关闭。
+     * 与分钟定时互斥；本模式无周期任务，递减发生在 [nextChapter] 的自然推进点。
+     */
+    private fun setChapterTimer(count: Int) {
+        timeMinute = 0
+        timeChapter = count.coerceAtLeast(0)
+        // doDs 收口：取消分钟倒计时 job、把滑条重置为 0（timeMinute=0）并刷新通知。
+        // 通知标题在 doDs 内读取 timeChapter，因此上面必须先赋值。
+        doDs()
+        postEvent(EventBus.READ_ALOUD_DS_CHAPTER, timeChapter)
+    }
+
+    private fun clearChapterTimer() {
+        if (timeChapter == 0) return
+        timeChapter = 0
+        postEvent(EventBus.READ_ALOUD_DS_CHAPTER, 0)
     }
 
     private fun addTimer() {
@@ -1508,6 +1555,8 @@ abstract class BaseReadAloudService : BaseService(),
             timeMinute += 10
             if (timeMinute > 180) timeMinute = 180
         }
+        // 通知栏“+10 分钟”按钮同属分钟定时：与 setTimer 一致地清空章节定时。
+        clearChapterTimer()
         doDs()
     }
 
@@ -1636,17 +1685,19 @@ abstract class BaseReadAloudService : BaseService(),
         mediaSessionCompat.isActive = true
     }
 
-    private fun upMediaMetadata() {
-        var nTitle: String = when {
-            loading -> getString(R.string.loading)
-            pause -> getString(R.string.read_aloud_pause)
-            timeMinute > 0 -> getString(
-                R.string.read_aloud_timer,
-                timeMinute
-            )
+    /**
+     * 通知栏/媒体控件的状态标题。分钟与章节定时互斥，仍按顺序判定（先分钟后章节）。
+     */
+    private fun aloudStatusTitle(): String = when {
+        loading -> getString(R.string.loading)
+        pause -> getString(R.string.read_aloud_pause)
+        timeMinute > 0 -> getString(R.string.read_aloud_timer, timeMinute)
+        timeChapter > 0 -> getString(R.string.read_aloud_timer_chapter, timeChapter)
+        else -> getString(R.string.read_aloud_t)
+    }
 
-            else -> getString(R.string.read_aloud_t)
-        }
+    private fun upMediaMetadata() {
+        var nTitle: String = aloudStatusTitle()
         nTitle += ": ${ReadBook.book?.name}"
         // 章节标题可能已随暂停被卸载，回退到书名，避免系统媒体通知出现字面 "null" (issue #3)
         val metadataTitle = currentReadAloudChapterTitle()?.takeIf { it.isNotBlank() }
@@ -1724,16 +1775,7 @@ abstract class BaseReadAloudService : BaseService(),
     }
 
     private fun createNotification(): NotificationCompat.Builder {
-        var nTitle: String = when {
-            loading -> getString(R.string.loading)
-            pause -> getString(R.string.read_aloud_pause)
-            timeMinute > 0 -> getString(
-                R.string.read_aloud_timer,
-                timeMinute
-            )
-
-            else -> getString(R.string.read_aloud_t)
-        }
+        var nTitle: String = aloudStatusTitle()
         nTitle += ": ${ReadBook.book?.name}"
         var nSubtitle = currentReadAloudChapterTitle()
         if (nSubtitle.isNullOrBlank())
@@ -1834,6 +1876,19 @@ abstract class BaseReadAloudService : BaseService(),
      */
     open fun nextChapter(syncView: Boolean = false) {
         ReadBook.upReadTime()
+        // 按章节定时：只有引擎自然读完（syncView=false）才消耗一章；
+        // 用户显式跳章（对话框/通知栏/线控，syncView=true）既不消耗也不清零。
+        if (!syncView && timeChapter > 0) {
+            timeChapter--
+            postEvent(EventBus.READ_ALOUD_DS_CHAPTER, timeChapter)
+            upReadAloudNotification()
+            if (timeChapter == 0) {
+                // 目标章已读完：停在章尾，不进入下一章。
+                AppLog.putDebug("[朗读] 按章节定时结束，停止朗读")
+                ReadAloud.stop(this)
+                return
+            }
+        }
         AppLog.putDebug("${currentReadAloudChapterTitle()} 朗读结束跳转下一章并朗读")
         resumeReadAloudInternal()
         advanceToNextChapter(syncView)

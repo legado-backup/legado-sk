@@ -222,6 +222,10 @@
     <string name="set_timer">定时</string>
     <string name="read_aloud_pause">朗读暂停</string>
     <string name="read_aloud_timer">正在朗读（还剩 %d 分钟）</string>
+    <string name="read_aloud_timer_chapter">正在朗读（还剩 %d 章）</string>
+    <string name="timer_chapter_current">听完本章</string>
+    <string name="timer_chapter_m">听完 %d 章</string>
+    <string name="timer_chapter">还剩 %d 章</string>
     <string name="read_aloud_backstage_confirm_title">是否后台继续听书？</string>
     <string name="read_aloud_backstage_confirm_msg">朗读仍在运行。可以继续后台听书，也可以停止朗读后退出；只有开启“悬浮到桌面”后，悬浮控制才会在 App 外显示。</string>
     <string name="speak_engine_current">当前引擎</string>

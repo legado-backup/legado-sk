@@ -9,6 +9,8 @@ object EventBus {
     const val READ_ALOUD_POSITION = "readAloudPosition"
     const val AUDIO_DS = "audioDs"
     const val READ_ALOUD_DS = "readAloudDs"
+    /** 按章节定时：载荷为剩余章数（0=未启用）。与 READ_ALOUD_DS 分开，避免分钟观察者误设滑条。 */
+    const val READ_ALOUD_DS_CHAPTER = "readAloudDsChapter"
     const val READ_ALOUD_PROGRESS = "readAloudProgress" // 融合第一阶段：朗读进度更新
     const val READ_ALOUD_ENGINE_CHANGED = "readAloudEngineChanged"
     const val READ_MAIN_MENU_VISIBILITY = "readMainMenuVisibility"

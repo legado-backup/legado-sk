@@ -18,4 +18,45 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />
 
+    <!-- 按章节定时快捷档：仅 TIMER 模式显示 -->
+    <LinearLayout
+        android:id="@+id/ll_chapter_options"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tv_chapter_current"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:padding="8dp"
+            android:textColor="@color/primaryText" />
+
+        <TextView
+            android:id="@+id/tv_chapter_3"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:padding="8dp"
+            android:textColor="@color/primaryText" />
+
+        <TextView
+            android:id="@+id/tv_chapter_5"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:padding="8dp"
+            android:textColor="@color/primaryText" />
+
+    </LinearLayout>
+
 </LinearLayout>

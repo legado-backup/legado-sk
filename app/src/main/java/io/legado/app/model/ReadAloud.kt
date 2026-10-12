@@ -518,6 +518,19 @@ object ReadAloud {
         }
     }
 
+    /**
+     * 按章节定时：引擎自然读完 [count] 章（本章算第 1 章）后停止朗读。
+     * 与分钟定时互斥，由服务侧统一清理另一模式。
+     */
+    fun setChapterTimer(context: Context, count: Int) {
+        if (BaseReadAloudService.isRun) {
+            val intent = Intent(context, commandClass() ?: return)
+            intent.action = IntentAction.setChapterTimer
+            intent.putExtra("chapterCount", count)
+            context.startForegroundServiceCompat(intent)
+        }
+    }
+
     fun setSpeed(context: Context, speed: Float) {
         if (BaseReadAloudService.isRun) {
             val intent = Intent(context, commandClass() ?: return)

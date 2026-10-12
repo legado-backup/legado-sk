@@ -905,9 +905,16 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
 
     @SuppressLint("SetTextI18n")
     private fun updateSessionIndicators() = binding.run {
+        // 章节定时与分钟定时互斥：章节模式优先显示剩余章数。
+        val chapterText = BaseReadAloudService.chapterTimerRemainingText()
         val timer = BaseReadAloudService.timeMinute.coerceAtLeast(0)
-        tvTimer.text = getString(R.string.timer_m, timer)
-        tvTimer.visible(timer > 0)
+        if (chapterText != null) {
+            tvTimer.text = chapterText
+            tvTimer.visible()
+        } else {
+            tvTimer.text = getString(R.string.timer_m, timer)
+            tvTimer.visible(timer > 0)
+        }
     }
 
     private fun showBookDownloadRangeDialog(book: Book) {
@@ -1023,6 +1030,7 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
             updateProgressForSelectedEngine()
         }
         observeEvent<Int>(EventBus.READ_ALOUD_DS) { updateSessionIndicators() }
+        observeEvent<Int>(EventBus.READ_ALOUD_DS_CHAPTER) { updateSessionIndicators() }
         observeEvent<ReadAloudPositionUpdate>(EventBus.READ_ALOUD_POSITION) { update ->
             if (!ReadAloud.isCurrentPosition(update)) return@observeEvent
             val position = update.position

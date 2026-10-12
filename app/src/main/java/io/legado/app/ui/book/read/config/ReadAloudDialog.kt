@@ -199,11 +199,29 @@ class ReadAloudDialog : BaseReaderSheetDialogFragment(R.layout.dialog_read_aloud
     private fun initData() = binding.run {
         upPlayState()
         upSpeakEngineSummary()
-        upTimerText(BaseReadAloudService.timeMinute)
         upSeekTimer()
+        upTimerText()
         upReadProgress()
     }
 
+    /**
+     * 定时档位：分钟（0=关闭）+ 章节（本章/3章/5章）。
+     * 两种定时互斥，由服务侧 setTimer/setChapterTimer 统一清理另一模式。
+     */
+    private fun showTimerSelector() {
+        val minuteOptions = intArrayOf(0, 5, 10, 15, 30, 60, 90, 180)
+        val chapterOptions = intArrayOf(1, 3, 5)
+        val labels = minuteOptions.map { "$it 分钟" } +
+            chapterOptions.map { BaseReadAloudService.chapterTimerOptionText(it) }
+        context?.selector("设定时间", labels) { _, index ->
+            val ctx = requireContext()
+            if (index < minuteOptions.size) {
+                ReadAloud.setTimer(ctx, minuteOptions[index])
+            } else {
+                ReadAloud.setChapterTimer(ctx, chapterOptions[index - minuteOptions.size])
+            }
+        }
+    }
     private fun initEvent() = binding.run {
         ivCatalog.gone()
         llMainMenu.visible(AppConfig.readAloudHideFloatingWindow && BaseReadAloudService.isRun)
@@ -280,11 +298,7 @@ class ReadAloudDialog : BaseReaderSheetDialogFragment(R.layout.dialog_read_aloud
             toastOnUi("保存设定时间成功！")
         }
         tvTimer.setOnClickListener {
-            val times = intArrayOf(0, 5, 10, 15, 30, 60, 90, 180)
-            val timeKeys = times.map { "$it 分钟" }
-            context?.selector("设定时间", timeKeys) { _, index ->
-                ReadAloud.setTimer(requireContext(), times[index])
-            }
+            showTimerSelector()
         }
         seekTtsSpeechRate.setOnSeekBarChangeListener(object : SeekBarChangeListener {
 
@@ -325,7 +339,10 @@ class ReadAloudDialog : BaseReaderSheetDialogFragment(R.layout.dialog_read_aloud
         })
         seekTimer.setOnSeekBarChangeListener(object : SeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                upTimerText(progress)
+                // 章节定时激活时滑条是被程序归零的（timeMinute=0），此时不得用分钟
+                // 文案覆盖章节状态；用户真正拖动切换回分钟模式由 READ_ALOUD_DS 事件纠正。
+                if (BaseReadAloudService.chapterTimerRemainingText() != null) return
+                upTimerMinutesText(progress)
             }
 
             override fun onStopTrackingTouch(seekBar: SeekBar) {
@@ -479,20 +496,42 @@ class ReadAloudDialog : BaseReaderSheetDialogFragment(R.layout.dialog_read_aloud
 
     private fun upSeekTimer() {
         binding.seekTimer.post {
-            if (BaseReadAloudService.timeMinute > 0) {
-                binding.seekTimer.progress = BaseReadAloudService.timeMinute
-            } else {
-                binding.seekTimer.progress = AppConfig.ttsTimer
+            when {
+                // 章节定时激活：分钟滑条无意义，归零避免显示保存的分钟默认值。
+                BaseReadAloudService.chapterTimerRemainingText() != null -> {
+                    binding.seekTimer.progress = 0
+                }
+
+                BaseReadAloudService.timeMinute > 0 -> {
+                    binding.seekTimer.progress = BaseReadAloudService.timeMinute
+                }
+
+                else -> {
+                    binding.seekTimer.progress = AppConfig.ttsTimer
+                }
             }
         }
     }
 
-    private fun upTimerText(timeMinute: Int) {
-        if (timeMinute < 0) {
-            binding.tvTimer.text = requireContext().getString(R.string.timer_m, 0)
+    /**
+     * 定时状态文案：章节模式优先（显示剩余章数），否则显示剩余分钟。
+     * 章节模式下滑条归 0（服务侧 timeMinute=0），避免滑条位置与状态不符。
+     */
+    private fun upTimerText() {
+        val chapterText = BaseReadAloudService.chapterTimerRemainingText()
+        if (chapterText != null) {
+            binding.tvTimer.text = chapterText
+            binding.seekTimer.progress = 0
         } else {
-            binding.tvTimer.text = requireContext().getString(R.string.timer_m, timeMinute)
+            upTimerMinutesText(BaseReadAloudService.timeMinute)
         }
+    }
+
+    private fun upTimerMinutesText(timeMinute: Int) {
+        binding.tvTimer.text = requireContext().getString(
+            R.string.timer_m,
+            timeMinute.coerceAtLeast(0)
+        )
     }
 
     @SuppressLint("SetTextI18n")
@@ -603,7 +642,11 @@ class ReadAloudDialog : BaseReaderSheetDialogFragment(R.layout.dialog_read_aloud
 
     override fun observeLiveBus() {
         observeEvent<Int>(EventBus.ALOUD_STATE) { upPlayState() }
-        observeEvent<Int>(EventBus.READ_ALOUD_DS) { binding.seekTimer.progress = it }
+        observeEvent<Int>(EventBus.READ_ALOUD_DS) {
+            binding.seekTimer.progress = it
+            upTimerText()
+        }
+        observeEvent<Int>(EventBus.READ_ALOUD_DS_CHAPTER) { upTimerText() }
         observeEvent<Boolean>(EventBus.CLOSE_READ_ALOUD_DIALOG) {
             dismissAllowingStateLoss()
         }

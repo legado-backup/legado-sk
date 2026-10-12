@@ -15,6 +15,7 @@ import io.legado.app.model.ReadBook
 import io.legado.app.service.BaseReadAloudService
 import io.legado.app.service.ReadAloudEngineType
 import io.legado.app.ui.widget.seekbar.SeekBarChangeListener
+import io.legado.app.utils.visible
 
 class SliderPopup(
     private val context: Context,
@@ -34,6 +35,7 @@ class SliderPopup(
         isOutsideTouchable = false
         isFocusable = true
         setProcess()
+        bindChapterOptions()
         binding.seekBar.setOnSeekBarChangeListener(object : SeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                 if (name == TIMER) {
@@ -61,19 +63,46 @@ class SliderPopup(
 
     override fun showAsDropDown(anchor: View?, xoff: Int, yoff: Int, gravity: Int) {
         super.showAsDropDown(anchor, xoff, yoff, gravity)
-        if (name == TIMER) {
-            binding.seekBar.progress = BaseReadAloudService.timeMinute.coerceAtLeast(0)
-        } else {
-            binding.seekBar.progress = currentSpeedProgress()
-        }
+        syncDisplay()
     }
 
     override fun showAtLocation(parent: View?, gravity: Int, x: Int, y: Int) {
         super.showAtLocation(parent, gravity, x, y)
-        if (name == TIMER) {
-            binding.seekBar.progress = BaseReadAloudService.timeMinute.coerceAtLeast(0)
-        } else {
+        syncDisplay()
+    }
+
+    /**
+     * 打开时同步显示：分钟滑条取当前剩余分钟；章节定时激活时数值区改显剩余章数
+     * （滑条此时归 0，直接显示“0 分钟”会与状态不符）。
+     */
+    private fun syncDisplay() {
+        if (name != TIMER) {
             binding.seekBar.progress = currentSpeedProgress()
+            return
+        }
+        binding.seekBar.progress = BaseReadAloudService.timeMinute.coerceAtLeast(0)
+        BaseReadAloudService.chapterTimerRemainingText()?.let {
+            binding.tvSeekValue.text = it
+        }
+    }
+
+    /**
+     * 按章节定时快捷档（本章/3章/5章）：仅 TIMER 模式，与分钟滑条共用互斥语义。
+     * 选择后关闭弹窗，剩余章数由 BaseReadAloudService.timeChapter 与事件同步展示。
+     */
+    private fun bindChapterOptions() {
+        if (name != TIMER) return
+        binding.llChapterOptions.visible()
+        val chapters = intArrayOf(1, 3, 5)
+        val views = arrayOf(binding.tvChapterCurrent, binding.tvChapter3, binding.tvChapter5)
+        views.forEachIndexed { index, view ->
+            val count = chapters[index]
+            view.text = BaseReadAloudService.chapterTimerOptionText(count)
+            view.setOnClickListener {
+                ReadAloud.setChapterTimer(context, count)
+                onValueChanged?.invoke()
+                dismiss()
+            }
         }
     }
 
