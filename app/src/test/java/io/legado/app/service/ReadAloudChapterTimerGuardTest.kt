@@ -278,24 +278,32 @@ class ReadAloudChapterTimerGuardTest {
     }
 
     /**
-     * 音量增强提示文案必须真的挂在开关上（声明了字符串但代码不用，只查 strings.xml 是查不出来的）。
+     * 音量增强的说明文案只能出现在 ⓘ 弹窗里（声明了字符串但代码不用，只查 strings.xml 是查不出来的）。
      */
     @Test
-    fun volumeGainSwitchStringsAreUsed() {
+    fun volumeGainHelpDialogUsesItsStrings() {
         val dialog = executableOnly(
             moduleSource("src/main/java/io/legado/app/ui/book/read/config/ReadAloudDialog.kt")
         )
-        val hint = slice(dialog, "private fun upVolumeGainHint", "R.string.read_aloud_volume_gain_on")
+        val help = slice(
+            dialog,
+            "ivVolumeGainHelp.setOnClickListener",
+            "R.string.read_aloud_volume_gain_hint"
+        )
         assertTrue(
-            "开启提示必须使用 read_aloud_volume_gain_on",
-            hint.contains("R.string.read_aloud_volume_gain_on")
+            "ⓘ 弹窗必须同时给出标题与说明（read_aloud_volume_gain / _hint）",
+            help.contains("R.string.read_aloud_volume_gain") &&
+                help.contains("R.string.read_aloud_volume_gain_hint")
         )
         for (path in listOf(
             "src/main/res/values/strings.xml",
             "src/main/res/values-zh/strings.xml"
         )) {
             val strings = moduleSource(path)
-            for (name in listOf("read_aloud_volume_gain", "read_aloud_volume_gain_on")) {
+            for (name in listOf(
+                "read_aloud_volume_gain",
+                "read_aloud_volume_gain_hint"
+            )) {
                 assertTrue("$path 缺少字符串 $name", strings.contains("name=\"$name\""))
             }
         }

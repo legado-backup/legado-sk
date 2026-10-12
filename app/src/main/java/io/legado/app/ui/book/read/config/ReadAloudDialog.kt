@@ -175,7 +175,6 @@ class ReadAloudDialog : BaseReaderSheetDialogFragment(R.layout.dialog_read_aloud
             ivTtsSpeechAdd.setColorFilter(textColor)
             cbVolumeGain.setTextColor(textColor)
             ivVolumeGainHelp.setColorFilter(palette.secondaryTextColor)
-            tvVolumeGainHint.setTextColor(palette.secondaryTextColor)
             tvTimerChapterCurrent.setTextColor(textColor)
             tvTimerChapter3.setTextColor(textColor)
             tvTimerChapter5.setTextColor(textColor)
@@ -562,21 +561,9 @@ class ReadAloudDialog : BaseReaderSheetDialogFragment(R.layout.dialog_read_aloud
     private fun bindVolumeGainControls() = binding.run {
         cbVolumeGain.setOnCheckedChangeListener(null)
         cbVolumeGain.isChecked = AppConfig.ttsVolumeGain > 0
-        upVolumeGainHint(cbVolumeGain.isChecked)
         cbVolumeGain.setOnCheckedChangeListener { _, isChecked ->
             AppConfig.ttsVolumeGain = if (isChecked) VolumeGain.MAX_PERCENT else 0
-            upVolumeGainHint(isChecked)
         }
-    }
-
-    /**
-     * 开启时如实说明音质代价（2 倍已在削波边缘）；关闭时不提示。
-     * ⚠️ 必须赋 CharSequence：`TextView.setText(Int)` 的参数是**字符串资源 id**，
-     * 传 0 会抛 `Resources$NotFoundException: String resource ID #0x0`（已实机崩溃过一次）。
-     */
-    private fun upVolumeGainHint(enabled: Boolean) {
-        binding.tvVolumeGainHint.text =
-            if (enabled) getString(R.string.read_aloud_volume_gain_on) else ""
     }
 
     private fun configureSpeechRateSlider() = binding.seekTtsSpeechRate.run {

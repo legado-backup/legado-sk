@@ -698,10 +698,9 @@
     <string name="auto_expand_find">自动展开发现</string>
     <string name="default_expand_first">默认展开第一组发现</string>
     <string name="threads_num">当前线程数 %s</string>
-    <string name="read_aloud_speed">朗读语速</string>
-    <string name="read_aloud_volume_gain">音量增强（2 倍）</string>
+    <string name="read_aloud_speed">语速</string>
+    <string name="read_aloud_volume_gain">音量增强</string>
     <string name="read_aloud_volume_gain_hint">音量增强是把解码后的音频直接放大 2 倍。能提高响度，但大声处可能失真。</string>
-    <string name="read_aloud_volume_gain_on">音质会受影响</string>
     <string name="auto_next_page">自动翻页</string>
     <string name="auto_next_page_stop">停止自动翻页</string>
     <string name="auto_next_page_speed">自动翻页间隔</string>

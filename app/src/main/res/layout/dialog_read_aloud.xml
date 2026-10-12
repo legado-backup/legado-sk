@@ -271,10 +271,15 @@
         android:orientation="vertical"
         android:paddingBottom="8dp">
 
+        <!--
+          语速与音量增强合成一行：语速 + 跟随系统靠左，音量增强靠右。
+          原先音量增强单独占一行，两行各自把内容摊在两端，中间留下大片空白。
+          标签一律用短文案（语速 / 音量增强），2 倍与音质代价只写在 ⓘ 弹窗里。
+        -->
         <LinearLayout
             android:id="@+id/ll_tts_SpeechRate"
             android:layout_width="match_parent"
-            android:layout_height="42dp"
+            android:layout_height="48dp"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingStart="8dp"
@@ -298,20 +303,46 @@
                 android:textColor="@color/primaryText"
                 android:textSize="14sp" />
 
+            <io.legado.app.lib.theme.view.ThemeSwitch
+                android:id="@+id/cb_tts_follow_sys"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:layout_marginStart="6dp"
+                android:contentDescription="@string/flow_sys"
+                android:text="@string/flow_sys"
+                android:textSize="14sp"
+                tools:ignore="RtlHardcoded,TouchTargetSizeCheck" />
+
             <Space
                 android:layout_width="0dp"
                 android:layout_height="1dp"
                 android:layout_gravity="center"
                 android:layout_weight="1" />
 
+            <!-- 音量增强：开关 + 固定 2 倍。2 倍以上是纯数字放大，只会削波失真，故不再提供更高档位 -->
             <io.legado.app.lib.theme.view.ThemeSwitch
-                android:id="@+id/cb_tts_follow_sys"
+                android:id="@+id/cb_volume_gain"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center_vertical"
-                android:contentDescription="@string/flow_sys"
-                android:text="@string/flow_sys"
-                tools:ignore="RtlHardcoded,TouchTargetSizeCheck" />
+                android:contentDescription="@string/read_aloud_volume_gain"
+                android:text="@string/read_aloud_volume_gain"
+                android:textSize="14sp"
+                tools:ignore="TouchTargetSizeCheck" />
+
+            <androidx.appcompat.widget.AppCompatImageView
+                android:id="@+id/iv_volume_gain_help"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/read_aloud_volume_gain_hint"
+                android:padding="8dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_help"
+                android:tint="@color/primaryText"
+                android:tooltipText="@string/read_aloud_volume_gain_hint"
+                tools:ignore="UnusedAttribute" />
 
         </LinearLayout>
 
@@ -349,51 +380,6 @@
                 android:tint="@color/primaryText"
                 android:tooltipText="@string/tts_speech_add"
                 tools:ignore="UnusedAttribute" />
-
-        </LinearLayout>
-
-        <!--
-          音量增强：开关 + 固定 2 倍。滑条已移除 —— 2 倍以上是纯数字放大，
-          大声处必然削波失真，再高的档位没有使用价值，只留「开 / 关」两个状态。
-        -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="42dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp">
-
-            <io.legado.app.lib.theme.view.ThemeSwitch
-                android:id="@+id/cb_volume_gain"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center_vertical"
-                android:text="@string/read_aloud_volume_gain"
-                tools:ignore="TouchTargetSizeCheck" />
-
-            <androidx.appcompat.widget.AppCompatImageView
-                android:id="@+id/iv_volume_gain_help"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/read_aloud_volume_gain_hint"
-                android:padding="15dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_help"
-                android:tint="@color/primaryText"
-                android:tooltipText="@string/read_aloud_volume_gain_hint"
-                tools:ignore="UnusedAttribute" />
-
-            <TextView
-                android:id="@+id/tv_volume_gain_hint"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:ellipsize="end"
-                android:gravity="end"
-                android:maxLines="1"
-                android:textSize="12sp" />
 
         </LinearLayout>
 
