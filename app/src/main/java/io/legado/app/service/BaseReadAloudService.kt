@@ -1052,6 +1052,10 @@ abstract class BaseReadAloudService : BaseService(),
         isRun = false
         pause = true
         loading = false
+        // ⚠️ 定时状态必须随会话一起清掉：分钟定时有 AppConfig.ttsTimer 兜底显示，
+        // 而按章节定时没有持久化默认值，残留的 timeChapter 会让下次打开面板仍显示
+        // 「还剩 N 章」而实际并无倒计时（已实机复现）。这里清零并通知界面。
+        clearChapterTimer()
         if (runningClass == this::class.java) {
             runningClass = null
             readAloudProgress = null

@@ -127,6 +127,23 @@ class ReadAloudChapterTimerGuardTest {
     }
 
     /**
+     * ⚠️ 停止朗读（onDestroy）也必须清掉章节定时。分钟定时有 AppConfig.ttsTimer 兜底显示，
+     * 章节定时没有持久化默认值：不清就会在服务已停止后仍显示「还剩 N 章」（已实机复现）。
+     */
+    @Test
+    fun chapterTimerClearsOnServiceDestroy() {
+        val onDestroy = slice(
+            serviceSource(),
+            "override fun onDestroy()",
+            "if (runningClass == this::class.java)"
+        )
+        assertTrue(
+            "onDestroy 必须 clearChapterTimer()，否则停止朗读后面板/通知仍显示剩余章数",
+            onDestroy.contains("clearChapterTimer()")
+        )
+    }
+
+    /**
      * 档位表只能有**一份**（`BaseReadAloudService.chapterTimerOptions`），三个入口都消费它。
      * 断言逐入口锚定「消费档位表 + 派发 setChapterTimer」，避免某处偷偷写死别的档位而漂移。
      */
