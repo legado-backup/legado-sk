@@ -43,20 +43,15 @@ import io.legado.app.constant.Theme
 import io.legado.app.data.appDb
 import io.legado.app.data.entities.Book
 import io.legado.app.databinding.ActivityAudioPlayBinding
-import io.legado.app.databinding.DialogDownloadChoiceBinding
 import io.legado.app.help.book.AudioTextFusion
 import io.legado.app.help.book.AudioTextMapping
 import io.legado.app.help.book.BookImgClick
 import io.legado.app.help.book.ContentProcessor
 import io.legado.app.help.config.AppConfig
-import io.legado.app.help.cache.CacheCoordinator
-import io.legado.app.help.cache.CacheRequestSource
-import io.legado.app.help.tts.TtsCacheParams
 import io.legado.app.help.book.isAudio
 import io.legado.app.help.book.isLocal
 import io.legado.app.help.book.isVideo
 import io.legado.app.lib.dialogs.alert
-import io.legado.app.lib.permission.NotificationPermission
 import io.legado.app.model.BookCover
 import io.legado.app.model.ImageProvider
 import io.legado.app.model.ReadAloud
@@ -69,14 +64,13 @@ import io.legado.app.service.ReadAloudEngineType
 import io.legado.app.service.ReadAloudProgress
 import io.legado.app.service.SourceAudioReadAloudService
 import io.legado.app.ui.about.AppLogDialog
-import io.legado.app.ui.book.audio.SliderPopup.Companion.SPEED
 import io.legado.app.ui.book.audio.SliderPopup.Companion.TIMER
 import io.legado.app.ui.book.audio.config.AudioPlayDisplaySettingDialog
 import io.legado.app.ui.book.audio.config.AudioSkipCredits
+import io.legado.app.ui.book.read.config.AiMultiVoiceDialog
 import io.legado.app.ui.book.read.config.ReadAloudConfigDialog
 import io.legado.app.ui.book.read.config.SpeakEngineDialog
 import io.legado.app.ui.book.cache.CacheManageActivity
-import io.legado.app.ui.book.cache.TtsCacheChapterDialog
 import io.legado.app.ui.book.toc.TocActivityResult
 import io.legado.app.ui.widget.seekbar.SeekBarChangeListener
 import io.legado.app.utils.applyNavigationBarPadding
@@ -104,9 +98,6 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
     override val binding by viewBinding(ActivityAudioPlayBinding::inflate)
     private val timerSliderPopup by lazy {
         SliderPopup(this, TIMER, ::updateSessionIndicators)
-    }
-    private val speedControlPopup by lazy {
-        SliderPopup(this, SPEED, ::updateSessionIndicators)
     }
     private var displayedProgress: ReadAloudProgress? = null
     private var trackingProgress = false
@@ -241,27 +232,16 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
         }
         ivRewind15?.setOnClickListener { adjustProgressBy(-progressStep()) }
         ivForward15?.setOnClickListener { adjustProgressBy(progressStep()) }
-        ivTimer.setOnClickListener {
+        // 四个功能胶囊（Rimchars FeaturePill 语义）：目录 / 定时 / 引擎 / 角色。
+        // 胶囊内自带图标与文字，点击落在整条胶囊上，不再依赖单个圆按钮。
+        llPillChapter?.setOnClickListener { tocActivityResult.launch(book.bookUrl) }
+        llPillTimer?.setOnClickListener {
             timerSliderPopup.showAsDropDown(it, 0, (-100).dpToPx(), Gravity.TOP)
         }
-        ivSpeedControl.setOnClickListener {
-            speedControlPopup.showAsDropDown(it, 0, (-100).dpToPx(), Gravity.TOP)
-        }
-        ivChapter.setOnClickListener { tocActivityResult.launch(book.bookUrl) }
-        ivCache?.setOnClickListener {
-            val ttsCacheBook = localTextBook()
-            if (ttsCacheBook != null) {
-                // 不可用不再静默：点击弹底部通知说明原因
-                ttsCacheUnavailableReason?.let { reason ->
-                    toastOnUi(reason)
-                    return@setOnClickListener
-                }
-                TtsCacheChapterDialog.newInstance(ttsCacheBook)
-                    .show(supportFragmentManager, "ttsCacheChapterDialog")
-            } else {
-                showBookDownloadRangeDialog(book)
-            }
-        }
+        llPillEngine?.setOnClickListener { showDialogFragment<SpeakEngineDialog>() }
+        llPillRole?.setOnClickListener { AiMultiVoiceDialog.show(supportFragmentManager) }
+        // 右上角齿轮：本页朗读全量设置（原先进来只能回阅读页开）。
+        ivSettings?.setOnClickListener { showDialogFragment<ReadAloudConfigDialog>() }
         listeningTextScroll.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -292,44 +272,25 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
     }
 
     private fun updateEngineUi() = binding.run {
-        ivCache?.apply {
-            visible()
-            val ttsCacheBook = localTextBook()
-            if (ttsCacheBook != null) {
-                // 本地文字书：下载语义 = TTS 缓存，门控与朗读面板同源
-                // （[TtsCacheParams.unavailableReasonRes]）；置灰保持可点，点击弹原因
-                contentDescription = getString(R.string.tts_cache)
-                ttsCacheUnavailableReason = TtsCacheParams.unavailableReasonRes(ttsCacheBook)
-                isEnabled = true
-                alpha = if (ttsCacheUnavailableReason == null) 1f else 0.45f
-            } else {
-                contentDescription = getString(R.string.offline_cache)
-                ttsCacheUnavailableReason = null
-                isEnabled = ReadBook.book?.isLocal == false
-                alpha = 1f
-            }
-        }
         bindListeningText()
         updateEngineBadge()
         invalidateOptionsMenu()
     }
 
     /**
-     * 页内引擎徽标：显示当前朗读引擎，点击直开引擎选择。
+     * 引擎胶囊上的文字：显示当前朗读引擎名，让"引擎"胶囊本身携带状态。
      *
-     * 存在意义是"朗读设置都在这一页里"——引擎选择原先只藏在右上角菜单。
      * 刷新由既有的 [EventBus.READ_ALOUD_ENGINE_CHANGED] 观察者（经 [updateEngineUi]）驱动，
-     * 不新增回调通道。书源音频没有 TTS 引擎概念，隐藏该徽标。
+     * 不新增回调通道。书源音频没有 TTS 引擎概念，隐藏该胶囊（届时目录/定时/角色仍可用）。
      */
     private fun updateEngineBadge() = binding.run {
-        val badge = tvEngine ?: return@run
+        val pill = llPillEngine ?: return@run
         if (ReadAloud.selectedEngineType == ReadAloudEngineType.SOURCE_AUDIO) {
-            badge.gone()
+            pill.gone()
             return@run
         }
-        badge.visible()
-        badge.text = currentEngineLabel()
-        badge.setOnClickListener { showDialogFragment<SpeakEngineDialog>() }
+        pill.visible()
+        tvPillEngine?.text = currentEngineLabel()
     }
 
     /** 当前朗读引擎的展示名：与朗读弹窗同名规则（系统 TTS / HTTP TTS / 脚本引擎）。 */
@@ -340,15 +301,6 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
                 ?: getString(R.string.http_tts_missing, ttsEngine)
         }
         return ReadAloud.selectedEngineLabel() ?: getString(R.string.system_tts)
-    }
-
-    /**
-     * 本地文字书：下载按钮语义 = TTS 缓存。不管当前朗读引擎是什么——本地书
-     * 没有在线正文可下载，唯一可缓存的产物就是 TTS 音频（百度/脚本/HTTP/系统同权）。
-     */
-    private fun localTextBook(): Book? {
-        val book = ReadBook.book ?: return null
-        return book.takeIf { it.isLocal && !it.isAudio && !it.isVideo }
     }
 
     /**
@@ -935,61 +887,16 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
 
     @SuppressLint("SetTextI18n")
     private fun updateSessionIndicators() = binding.run {
+        // 定时状态直接显示在「定时」胶囊上（Rimchars 同款：胶囊文字即状态）。
         // 章节定时与分钟定时互斥：章节模式优先显示剩余章数。
         val chapterText = BaseReadAloudService.chapterTimerRemainingText()
         val timer = BaseReadAloudService.timeMinute.coerceAtLeast(0)
-        if (chapterText != null) {
-            tvTimer.text = chapterText
-            tvTimer.visible()
+        tvPillTimer?.text = chapterText ?: if (timer > 0) {
+            getString(R.string.timer_m, timer)
         } else {
-            tvTimer.text = getString(R.string.timer_m, timer)
-            tvTimer.visible(timer > 0)
+            getString(R.string.set_timer)
         }
-    }
-
-    private fun showBookDownloadRangeDialog(book: Book) {
-        alert(titleResource = R.string.offline_cache) {
-            val total = ReadBook.simulatedChapterSize.coerceAtLeast(book.totalChapterNum).coerceAtLeast(1)
-            val alertBinding = DialogDownloadChoiceBinding.inflate(layoutInflater).apply {
-                editStart.setText((ReadBook.durChapterIndex + 1).coerceAtLeast(1).toString())
-                editEnd.setText(total.toString())
-            }
-            customView { alertBinding.root }
-            okButton {
-                NotificationPermission.ensure(
-                    this@AudioPlayActivity,
-                    onGranted = {
-                        val start = alertBinding.editStart.text?.toString()?.toIntOrNull()
-                            ?.coerceIn(1, total) ?: 1
-                        val end = alertBinding.editEnd.text?.toString()?.toIntOrNull()
-                            ?.coerceIn(start, total) ?: total
-                        val chapterIndexes = (start - 1)..(end - 1)
-                        // 音频页显式“缓存章节范围”：重复下载已缓存章时，评论不再“有快照就跳过”，
-                        // 而是由 MEDIA 任务追加的 READER REVIEW 按待刷新标记走 force 整页重抓最新快照。
-                        for (chapterIndex in chapterIndexes) {
-                            CacheCoordinator.markReviewRefresh(book.bookUrl, chapterIndex)
-                        }
-                        CacheCoordinator.submitBookDownload(
-                            book = book,
-                            chapterIndexes = chapterIndexes,
-                            source = CacheRequestSource.READER,
-                            // 用户显式重复下载：已缓存评论增量补新，而不是纯跳过
-                            reviewIncremental = true,
-                        )
-                        toastOnUi(
-                            getString(
-                                R.string.cache_manage_cache_selected_done,
-                                chapterIndexes.count(),
-                            )
-                        )
-                    },
-                    onDenied = {
-                        toastOnUi(R.string.notification_permission_required_for_download)
-                    }
-                )
-            }
-            cancelButton()
-        }
+        llPillTimer?.isSelected = chapterText != null || timer > 0
     }
 
     override fun onCompatCreateOptionsMenu(menu: Menu): Boolean {

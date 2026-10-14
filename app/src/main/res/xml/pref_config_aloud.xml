@@ -64,6 +64,18 @@
             app:iconSpaceReserved="false" />
 
         <io.legado.app.lib.prefs.Preference
+            android:key="ttsSpeechRate"
+            android:summary="@string/read_aloud_speed"
+            android:title="@string/read_aloud_speed"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.Preference
+            android:key="readAloudCacheEntry"
+            android:summary="@string/read_aloud_cache_entry_summary"
+            android:title="@string/read_aloud_cache_entry"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.Preference
             android:key="ttsCacheSettings"
             android:summary="@string/tts_cache_settings_summary"
             android:title="@string/tts_cache_settings"
@@ -145,6 +157,12 @@
             android:key="readAloudFloatOnDesktop"
             android:summary="@string/read_aloud_float_on_desktop_summary"
             android:title="@string/read_aloud_float_on_desktop"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.Preference
+            android:key="appTtsEngine"
+            android:summary="@string/system_tts"
+            android:title="@string/speak_engine"
             app:iconSpaceReserved="false" />
 
         <io.legado.app.lib.prefs.Preference

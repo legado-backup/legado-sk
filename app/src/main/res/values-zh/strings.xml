@@ -208,6 +208,11 @@
     <string name="ps_hide_status_bar">阅读界面隐藏状态栏</string>
     <string name="read_aloud">朗读</string>
     <string name="read_aloud_setting">朗读设置</string>
+    <string name="read_aloud_cache_entry">缓存</string>
+    <string name="read_aloud_cache_entry_summary">缓存正文或 TTS 音频；与听书页原先的下载按钮同一入口</string>
+    <string name="read_aloud_group_basic">基础</string>
+    <string name="read_aloud_group_reading">朗读</string>
+    <string name="read_aloud_group_engine">引擎</string>
     <string name="read_aloud_t">正在朗读</string>
     <string name="read_aloud_s">点击打开阅读界面</string>
     <string name="audio_play">播放</string>
@@ -700,6 +705,7 @@
     <string name="default_expand_first">默认展开第一组发现</string>
     <string name="threads_num">当前线程数 %s</string>
     <string name="read_aloud_speed">语速</string>
+    <string name="read_aloud_speed_value">当前 %1$s 倍</string>
     <string name="read_aloud_volume_gain">音量增强</string>
     <string name="read_aloud_volume_gain_hint">音量增强是把解码后的音频直接放大 2 倍。能提高响度，但大声处可能失真。</string>
     <string name="auto_next_page">自动翻页</string>

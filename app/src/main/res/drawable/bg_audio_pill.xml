@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 听书页功能胶囊底：未选中为半透明玻璃（复用全库 glass_overlay，约 13% 白），
+     选中为强调色。圆角沿用 ui_action_radius，与全库动作控件一致。
+     对照 Rimchars FeaturePill（未选中 colors.panel 半透明 / 选中 colors.accent）。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true">
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/ui_action_radius" />
+            <solid android:color="@color/accent" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/ui_action_radius" />
+            <solid android:color="@color/glass_overlay" />
+        </shape>
+    </item>
+</selector>

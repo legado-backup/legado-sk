@@ -209,6 +209,11 @@
     <string name="ps_hide_status_bar">Hide system navigation bar when reading</string>
     <string name="read_aloud">Speech</string>
     <string name="read_aloud_setting">Speech Settings</string>
+    <string name="read_aloud_cache_entry">Cache</string>
+    <string name="read_aloud_cache_entry_summary">Cache text or TTS audio; same entry as the old download button on the listening page</string>
+    <string name="read_aloud_group_basic">Basic</string>
+    <string name="read_aloud_group_reading">Reading</string>
+    <string name="read_aloud_group_engine">Engine</string>
     <string name="read_aloud_t">Speaking</string>
     <string name="read_aloud_s">Click to open the Reading</string>
     <string name="audio_play">Play</string>
@@ -700,6 +705,7 @@
     <string name="default_expand_first">Default expand the first Discovery.</string>
     <string name="threads_num">Current threads %s</string>
     <string name="read_aloud_speed">Speed</string>
+    <string name="read_aloud_speed_value">Current %1$sx</string>
     <string name="read_aloud_volume_gain">Volume boost</string>
     <string name="read_aloud_volume_gain_hint">Volume boost amplifies the decoded audio by 2x. It raises loudness, but loud passages may distort.</string>
     <string name="auto_next_page">Auto scroll</string>

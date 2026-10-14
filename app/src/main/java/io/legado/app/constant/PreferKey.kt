@@ -387,6 +387,16 @@ object PreferKey {
     const val readAloudHidePagePanel = "readAloudHidePagePanel"
     const val readAloudPanelOnPageFooter = "readAloudPanelOnPageFooter"
     const val readAloudFloatOnDesktop = "readAloudFloatOnDesktop"
+
+    /**
+     * 朗读设置分组页签（ReadAloudConfigGroup）需要的三个 key。
+     * 此前它们只以字面量散落在 xml 与 ReadAloudConfigDialog 的 when 分支里，
+     * 分组过滤需要按 key 归类，故收敛成常量，避免组定义与分支各写一份字面量。
+     */
+    const val mediaButtonPerNext = "mediaButtonPerNext"
+    const val readAloudCacheEntry = "readAloudCacheEntry"
+    const val sysTtsConfig = "sysTtsConfig"
+    const val ttsCacheSettings = "ttsCacheSettings"
     const val readAloudFloatX = "readAloudFloatX"
     const val readAloudFloatY = "readAloudFloatY"
     const val audioBookDirectAudioPlayNoSubtitle = "audioBookDirectAudioPlayNoSubtitle"
