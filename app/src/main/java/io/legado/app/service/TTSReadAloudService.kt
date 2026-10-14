@@ -582,12 +582,22 @@ class TTSReadAloudService : BaseReadAloudService() {
         val utteranceLen = currentUtteranceTextLength()
         if (utteranceLen <= 0) return
         wavPosJob = lifecycleScope.launch {
-            upTtsProgress(readAloudNumber + 1)
+            val duration = wavPlayer.duration
+            // 锚点必须取真实播放位置，不能用本句句首：
+            // 调语速会 playStop()+play() 重播当前句（upSpeechRate），本函数随之重启，
+            // 锚在句首会把朗读位置拉回本句开头，表现为「拖语速跳进度」。
+            val anchor = if (duration > 0) {
+                (utteranceLen.toLong() * wavPlayer.currentPosition / duration).toInt()
+                    .coerceIn(0, utteranceLen)
+            } else {
+                0
+            }
+            upTtsProgress(readAloudNumber + anchor + 1)
             if (pageSplit) return@launch
             while (isActive && isRun && !pause) {
-                val duration = wavPlayer.duration
-                if (duration > 0) {
-                    val pos = (utteranceLen.toLong() * wavPlayer.currentPosition / duration).toInt()
+                val duration0 = wavPlayer.duration
+                if (duration0 > 0) {
+                    val pos = (utteranceLen.toLong() * wavPlayer.currentPosition / duration0).toInt()
                     if (pageIndex + 1 < chapter.pageSize
                         && readAloudNumber + pos > chapter.getReadLength(pageIndex + 1)
                     ) {
@@ -597,7 +607,7 @@ class TTSReadAloudService : BaseReadAloudService() {
                         AppLog.putDebug("[朗读] WAV过界发布 pos:${readAloudNumber + pos}")
                         upTtsProgress(readAloudNumber + pos)
                     }
-                    if (wavPlayer.currentPosition >= duration) break
+                    if (wavPlayer.currentPosition >= duration0) break
                 }
                 delay(80)
             }

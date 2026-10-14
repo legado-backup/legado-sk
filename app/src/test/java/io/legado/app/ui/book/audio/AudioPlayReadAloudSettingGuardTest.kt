@@ -401,4 +401,43 @@ class AudioPlayReadAloudSettingGuardTest {
             body.contains("upTtsProgress(readAloudNumber + charBase + anchor + 1)")
         )
     }
+
+    /**
+     * 系统 TTS 引擎链路（[TTSReadAloudService]，如转发器 multiTTS 当系统引擎用）有
+     * **同构的同一处锚点问题**，必须一并锁住。
+     *
+     * 该链路 `upSpeechRate` 走 `playStop()+play()` 重播当前句 → `upWavPlayPos()` 重启，
+     * 若锚在句首同样会把位置拉回本句开头。只修 HTTP 链路会让「转发器当系统引擎」
+     * 这条最常见的用法继续复现（实测 10 次里偶发 1 次即来自这里）。
+     */
+    @Test
+    fun wavIntraparagraphAnchorUsesRealPlaybackPosition() {
+        val source = moduleSource(
+            "src/main/java/io/legado/app/service/TTSReadAloudService.kt"
+        )
+        val body = slice(source, "private fun upWavPlayPos()", "\n    }\n")
+
+        assertTrue(
+            "必须先取播放器时长再算锚点（否则拿不到真实播放位置）",
+            body.contains("val duration = wavPlayer.duration")
+        )
+        assertTrue(
+            "必须基于真实播放位置计算锚点 anchor",
+            body.contains("val anchor =")
+        )
+        assertTrue(
+            "句首锚点必须消失：调语速重播当前句时它会把进度拉回本句开头",
+            !body.contains("upTtsProgress(readAloudNumber + 1)")
+        )
+        assertTrue(
+            "发布的必须是锚点位置",
+            body.contains("upTtsProgress(readAloudNumber + anchor + 1)")
+        )
+        // 锚点发布必须在 pageSplit 提前返回之前，否则分段开启时本句位置永远不更新
+        assertTrue(
+            "锚点发布必须在 pageSplit 提前返回之前",
+            body.indexOf("upTtsProgress(readAloudNumber + anchor + 1)") <
+                body.indexOf("if (pageSplit) return@launch")
+        )
+    }
 }
