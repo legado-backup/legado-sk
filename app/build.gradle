@@ -241,13 +241,6 @@ android {
                 "src/main/res/drawable/selector_circle_btn_bg.xml"
         ).withPropertyName("audioPlayReadAloudSettingGuardResources")
                 .withPathSensitivity(PathSensitivity.RELATIVE)
-        // ReadAloudConfigChangeGuardTest 断言配置热更的收口（不得再借用媒体键）。
-        inputs.files(
-                "src/main/java/io/legado/app/constant/EventBus.kt",
-                "src/main/java/io/legado/app/help/readaloud/ReadAloudConfigChangeNotifier.kt",
-                "src/main/java/io/legado/app/ui/book/read/config/ReadAloudConfigDialog.kt"
-        ).withPropertyName("readAloudConfigChangeGuardSources")
-                .withPathSensitivity(PathSensitivity.RELATIVE)
     }
     lint { //忽略string翻译缺失，后面需要翻译时去掉，todo
         checkDependencies = false
