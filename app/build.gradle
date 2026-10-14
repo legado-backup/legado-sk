@@ -230,6 +230,19 @@ android {
                 "src/main/res/values-zh/strings.xml"
         ).withPropertyName("changeSourceCurrentRowGuardResources")
                 .withPathSensitivity(PathSensitivity.RELATIVE)
+        // AudioPlayReadAloudSettingGuardTest 断言听书页的引擎徽标与「朗读设置」入口。
+        inputs.files(
+                "src/main/res/layout/activity_audio_play.xml",
+                "src/main/res/menu/audio_play.xml"
+        ).withPropertyName("audioPlayReadAloudSettingGuardResources")
+                .withPathSensitivity(PathSensitivity.RELATIVE)
+        // ReadAloudConfigChangeGuardTest 断言配置热更的收口（不得再借用媒体键）。
+        inputs.files(
+                "src/main/java/io/legado/app/constant/EventBus.kt",
+                "src/main/java/io/legado/app/help/readaloud/ReadAloudConfigChangeNotifier.kt",
+                "src/main/java/io/legado/app/ui/book/read/config/ReadAloudConfigDialog.kt"
+        ).withPropertyName("readAloudConfigChangeGuardSources")
+                .withPathSensitivity(PathSensitivity.RELATIVE)
     }
     lint { //忽略string翻译缺失，后面需要翻译时去掉，todo
         checkDependencies = false

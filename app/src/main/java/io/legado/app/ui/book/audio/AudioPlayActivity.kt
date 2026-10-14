@@ -73,6 +73,7 @@ import io.legado.app.ui.book.audio.SliderPopup.Companion.SPEED
 import io.legado.app.ui.book.audio.SliderPopup.Companion.TIMER
 import io.legado.app.ui.book.audio.config.AudioPlayDisplaySettingDialog
 import io.legado.app.ui.book.audio.config.AudioSkipCredits
+import io.legado.app.ui.book.read.config.ReadAloudConfigDialog
 import io.legado.app.ui.book.read.config.SpeakEngineDialog
 import io.legado.app.ui.book.cache.CacheManageActivity
 import io.legado.app.ui.book.cache.TtsCacheChapterDialog
@@ -309,7 +310,36 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
             }
         }
         bindListeningText()
+        updateEngineBadge()
         invalidateOptionsMenu()
+    }
+
+    /**
+     * 页内引擎徽标：显示当前朗读引擎，点击直开引擎选择。
+     *
+     * 存在意义是"朗读设置都在这一页里"——引擎选择原先只藏在右上角菜单。
+     * 刷新由既有的 [EventBus.READ_ALOUD_ENGINE_CHANGED] 观察者（经 [updateEngineUi]）驱动，
+     * 不新增回调通道。书源音频没有 TTS 引擎概念，隐藏该徽标。
+     */
+    private fun updateEngineBadge() = binding.run {
+        val badge = tvEngine ?: return@run
+        if (ReadAloud.selectedEngineType == ReadAloudEngineType.SOURCE_AUDIO) {
+            badge.gone()
+            return@run
+        }
+        badge.visible()
+        badge.text = currentEngineLabel()
+        badge.setOnClickListener { showDialogFragment<SpeakEngineDialog>() }
+    }
+
+    /** 当前朗读引擎的展示名：与朗读弹窗同名规则（系统 TTS / HTTP TTS / 脚本引擎）。 */
+    private fun currentEngineLabel(): String {
+        val ttsEngine = ReadAloud.ttsEngine ?: return getString(R.string.system_tts)
+        if (StringUtils.isNumeric(ttsEngine)) {
+            return appDb.httpTTSDao.getName(ttsEngine.toLong())
+                ?: getString(R.string.http_tts_missing, ttsEngine)
+        }
+        return ReadAloud.selectedEngineLabel() ?: getString(R.string.system_tts)
     }
 
     /**
@@ -975,6 +1005,9 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
         menu.findItem(R.id.menu_skip_credits).isVisible = sourceAudio
         menu.findItem(R.id.menu_audio_cache).isVisible = sourceAudio
         menu.findItem(R.id.menu_audio_engine).isVisible = true
+        // 朗读全量设置原先只能在阅读页的朗读面板里开，听书页内不可达；
+        // 书源音频没有 TTS 引擎/合成参数那套设置，隐藏。
+        menu.findItem(R.id.menu_read_aloud_config).isVisible = !sourceAudio
         return super.onCompatCreateOptionsMenu(menu)
     }
 
@@ -994,6 +1027,7 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
             R.id.menu_audio_cache -> startActivity<CacheManageActivity> {
                 putExtra(CacheManageActivity.EXTRA_MODE, CacheManageActivity.MODE_AUDIO)
             }
+            R.id.menu_read_aloud_config -> showDialogFragment<ReadAloudConfigDialog>()
             R.id.menu_audio_engine -> showDialogFragment<SpeakEngineDialog>()
             R.id.menu_audio_play_display_setting -> showDialogFragment<AudioPlayDisplaySettingDialog>()
             R.id.menu_log -> showDialogFragment<AppLogDialog>()
