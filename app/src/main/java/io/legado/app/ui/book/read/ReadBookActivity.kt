@@ -1962,6 +1962,25 @@ class ReadBookActivity : BaseReadBookActivity(),
         showDialogFragment<ReadAloudDialog>()
     }
 
+    /**
+     * 长按「朗读」：开关开启时直接进听书页，否则维持旧的朗读控制面板。
+     * 未在朗读时先起朗读会话，否则听书页打开后无会话可控（与「朗读」按钮同构）。
+     */
+    override fun onLongClickReadAloud() {
+        if (!AppConfig.readAloudLongPressToAudioPlay) {
+            showReadAloudDialog()
+            return
+        }
+        if (!BaseReadAloudService.isRun) {
+            if (AppConfig.readAloudFloatOnDesktop) {
+                requestReadAloudFloatPermissionIfNeeded()
+            }
+            ReadAloud.upReadAloudClass()
+            restartFromPage()
+        }
+        ReadAloud.openAudioPlayActivity(this)
+    }
+
     fun toReadAloudBackstage() {
         if (AppConfig.readAloudFloatOnDesktop) {
             requestReadAloudFloatPermissionIfNeeded()

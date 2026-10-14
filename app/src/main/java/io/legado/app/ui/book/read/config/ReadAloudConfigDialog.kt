@@ -72,7 +72,8 @@ enum class ReadAloudConfigGroup(
             PreferKey.readAloudWakeLock,
             PreferKey.mediaButtonPerNext,
             PreferKey.readAloudHideFloatingWindow,
-            PreferKey.readAloudFloatOnDesktop
+            PreferKey.readAloudFloatOnDesktop,
+            PreferKey.readAloudLongPressToAudioPlay
         )
     ),
     Reading(

@@ -1593,6 +1593,10 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
     val readAloudHideFloatingWindow
         get() = appCtx.getPrefBoolean(PreferKey.readAloudHideFloatingWindow, true)
 
+    // 长按朗读按钮直接进入听书页（关闭时长按弹出朗读控制面板，保持旧行为）
+    val readAloudLongPressToAudioPlay
+        get() = appCtx.getPrefBoolean(PreferKey.readAloudLongPressToAudioPlay, false)
+
     // 无字幕音频书直接进入沉浸式听书页（AudioPlayActivity），默认开启
     val audioBookDirectAudioPlayNoSubtitle
         get() = appCtx.getPrefBoolean(PreferKey.audioBookDirectAudioPlayNoSubtitle, true)

@@ -739,7 +739,7 @@ class ReadMenu @JvmOverloads constructor(
         }
         llReadAloud.onLongClick {
             runMenuOut {
-                callBack.showReadAloudDialog()
+                callBack.onLongClickReadAloud()
             }
         }
         //界面
@@ -879,6 +879,13 @@ class ReadMenu @JvmOverloads constructor(
         fun showReadStyle()
         fun showMoreSetting()
         fun showReadAloudDialog()
+
+        /**
+         * 长按「朗读」按钮。按 [PreferKey.readAloudLongPressToAudioPlay] 决定是直接进听书页，
+         * 还是维持旧行为弹出朗读控制面板。与 [showReadAloudDialog] 分开，避免悬浮窗那条
+         * 路径（EventBus.OPEN_READ_ALOUD_DIALOG）被一并改掉。
+         */
+        fun onLongClickReadAloud()
         fun upSystemUiVisibility()
         fun onClickReadAloud()
         fun showHelp()

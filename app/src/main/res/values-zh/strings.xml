@@ -237,6 +237,8 @@
     <string name="speak_engine_current">当前引擎</string>
     <string name="read_aloud_float_on_desktop">悬浮到桌面</string>
     <string name="read_aloud_float_on_desktop_summary">在本 App 外显示朗读控制悬浮窗，需要悬浮窗权限；关闭时仅在阅读页内悬浮。</string>
+    <string name="read_aloud_long_press_to_audio_play">长按朗读直接进入听书页</string>
+    <string name="read_aloud_long_press_to_audio_play_summary">开启后，长按阅读菜单里的「朗读」按钮直接打开听书页；关闭时仍弹出朗读控制面板。</string>
     <string name="fallback_setting">回退设置</string>
     <string name="fallback_setting_summary">回退激进的新功能行为</string>
     <string name="audio_book_direct_audio_play_no_subtitle">无字幕音频书直接进入沉浸式听书</string>

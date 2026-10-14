@@ -159,6 +159,13 @@
             android:title="@string/read_aloud_float_on_desktop"
             app:iconSpaceReserved="false" />
 
+        <io.legado.app.lib.prefs.SwitchPreference
+            android:defaultValue="false"
+            android:key="readAloudLongPressToAudioPlay"
+            android:summary="@string/read_aloud_long_press_to_audio_play_summary"
+            android:title="@string/read_aloud_long_press_to_audio_play"
+            app:iconSpaceReserved="false" />
+
         <io.legado.app.lib.prefs.Preference
             android:key="appTtsEngine"
             android:summary="@string/system_tts"

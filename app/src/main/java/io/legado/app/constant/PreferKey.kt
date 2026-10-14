@@ -389,6 +389,13 @@ object PreferKey {
     const val readAloudFloatOnDesktop = "readAloudFloatOnDesktop"
 
     /**
+     * 长按「朗读」按钮的行为：开 = 直接进入听书页（AudioPlayActivity），
+     * 关 = 旧行为，弹出朗读控制面板。⚠️ 默认**关**，与 `pref_config_aloud.xml`
+     * 的 `android:defaultValue` 必须一致。
+     */
+    const val readAloudLongPressToAudioPlay = "readAloudLongPressToAudioPlay"
+
+    /**
      * 朗读设置分组页签（ReadAloudConfigGroup）需要的三个 key。
      * 此前它们只以字面量散落在 xml 与 ReadAloudConfigDialog 的 when 分支里，
      * 分组过滤需要按 key 归类，故收敛成常量，避免组定义与分支各写一份字面量。
