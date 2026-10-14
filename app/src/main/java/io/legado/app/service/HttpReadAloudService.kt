@@ -1100,14 +1100,9 @@ class HttpReadAloudService : BaseReadAloudService(),
         playIndexJob = lifecycleScope.launch {
             val queueEntry = scriptQueue.firstOrNull()
             val charBase = queueEntry?.charStartInUnit ?: 0
-            upTtsProgress(readAloudNumber + charBase + 1)
             val content = contentList.getOrNull(nowSpeak) ?: return@launch
             val speakTextLength = queueEntry?.textLength ?: content.length
             if (speakTextLength <= 0) {
-                return@launch
-            }
-            // 页间分段 ON：朗读单元已在页边界裂开，句内不存在页界，无需句内预测
-            if (pageSplit) {
                 return@launch
             }
             val duration = exoPlayer.duration
@@ -1126,6 +1121,15 @@ class HttpReadAloudService : BaseReadAloudService(),
                 (speakTextLength.toLong() * exoPlayer.currentPosition / duration).toInt()
             } else {
                 (exoPlayer.currentPosition / sleep).toInt()
+            }
+            // 锚点必须取真实播放位置，不能用本段段首：
+            // 播放端倍速兜底的引擎（合成 URL 无语速占位符，如转发器）每拖一格语速
+            // 都会重启句内轮询，锚在段首会把朗读位置拉回本段开头，表现为「拖语速跳进度」。
+            val anchor = start.coerceIn(0, speakTextLength)
+            upTtsProgress(readAloudNumber + charBase + anchor + 1)
+            // 页间分段 ON：朗读单元已在页边界裂开，句内不存在页界，无需句内预测
+            if (pageSplit) {
+                return@launch
             }
             for (i in start..speakTextLength) {
                 if (pageIndex + 1 < textChapter.pageSize

@@ -358,4 +358,47 @@ class AudioPlayReadAloudSettingGuardTest {
             body.contains("chapterTimerRemainingText()")
         )
     }
+
+    /**
+     * 句内轮询的**位置锚点必须取真实播放位置**，不能锚在本段段首。
+     *
+     * 播放端倍速兜底的引擎（合成 URL 无 `speakSpeed` 占位符，如转发器 multiTTS）
+     * 每拖一格语速都会重启一次句内轮询（`upSpeechRate` → `upPlayPos`）。若锚点在
+     * 段首，就会把朗读位置拉回本段开头 → 进度条/正文高亮回跳；已合成完（duration>0）
+     * 且读到中后段时回拉幅度最大，故只在此时复现，流式合成中 curPos≈0 时几乎看不出。
+     *
+     * ⚠️ 这里断言的是**序关系**：锚点发布必须在 `start`（真实播放位置）算出之后，
+     * 且表达式里必须用到 `anchor`/`start`。只断言「文件里有 upTtsProgress」是无效断言——
+     * 把发布挪回段首后子串依然命中。
+     */
+    @Test
+    fun intraParagraphAnchorUsesRealPlaybackPosition() {
+        val source = moduleSource(
+            "src/main/java/io/legado/app/service/HttpReadAloudService.kt"
+        )
+        val body = slice(source, "private fun upPlayPos()", "\n    }\n")
+
+        val startAt = body.indexOf("val start =")
+        assertTrue("未找到真实播放位置 start 的计算（锚点已漂移）", startAt >= 0)
+
+        val anchorAt = body.indexOf("val anchor =")
+        assertTrue(
+            "必须基于真实播放位置计算锚点 anchor",
+            anchorAt >= 0
+        )
+        assertTrue(
+            "锚点必须在 start 之后计算（否则拿不到真实播放位置）",
+            anchorAt > startAt
+        )
+
+        val publishAt = body.indexOf("upTtsProgress(")
+        assertTrue(
+            "位置发布必须在 start 之后：锚在段首会让拖语速把进度拉回本段开头",
+            publishAt > startAt
+        )
+        assertTrue(
+            "发布的必须是锚点位置，不能是本段段首（readAloudNumber + charBase + 1）",
+            body.contains("upTtsProgress(readAloudNumber + charBase + anchor + 1)")
+        )
+    }
 }
