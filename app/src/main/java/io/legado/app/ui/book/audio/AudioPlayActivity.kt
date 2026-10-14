@@ -232,6 +232,11 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
         ivSkipPrevious.setOnClickListener {
             ReadAloud.prevChapter(this@AudioPlayActivity)
         }
+        // 停止：结束朗读会话（区别于左侧 FAB 的暂停/继续）。停止后服务会发
+        // Status.STOP，observeLiveBus 里的 ALOUD_STATE 分支据此 finish() 本页。
+        ivStop.setOnClickListener {
+            ReadAloud.stop(this@AudioPlayActivity)
+        }
         ivSkipNext.setOnClickListener {
             ReadAloud.nextChapter(this@AudioPlayActivity)
         }
@@ -885,6 +890,8 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
         val running = BaseReadAloudService.isRun
         progressLoading.visible(running && BaseReadAloudService.loading)
         fabPlayStop.isEnabled = !running || !BaseReadAloudService.loading
+        // 没有会话时「停止」是空操作，禁用掉免得看起来能点却没反应
+        ivStop.isEnabled = running
         fabPlayStop.setImageResource(
             if (!running || BaseReadAloudService.pause) {
                 R.drawable.ic_play_24dp

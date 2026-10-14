@@ -21,13 +21,18 @@ import java.io.File
  */
 class AudioPlayReadAloudSettingGuardTest {
 
+    /**
+     * 读取模块内文件源码。
+     * ⚠️ 统一把 CRLF 折成 LF：本仓库的 `.kt` 是 CRLF，`readText()` **不会**归一化行尾，
+     * 于是按 `"\n\n"` 这类含换行的标记切片会永远找不到结束标记。
+     */
     private fun moduleSource(relativePath: String): String {
         val f = File(relativePath)
         assertTrue(
             "找不到 $relativePath（Gradle 单测 CWD 应为模块目录 app/）：${f.absolutePath}",
             f.exists()
         )
-        return f.readText()
+        return f.readText().replace("\r\n", "\n")
     }
 
     private fun activitySource(): String = moduleSource(
@@ -209,6 +214,51 @@ class AudioPlayReadAloudSettingGuardTest {
         assertTrue(
             "音量增强按钮必须反映当前开关状态",
             gainBody.contains("isSelected = AppConfig.ttsVolumeGain > 0")
+        )
+    }
+
+    /**
+     * 听书页必须有真正的「停止」（结束会话），且与「暂停」是两件事。
+     *
+     * ⚠️ 本页原先只有一个 FAB：它在 播放/暂停/继续 之间切换，**没有停止**。
+     * 作者明确要求补上「点一下结束朗读、退出前台服务」的入口，语义对照朗读面板
+     * 的 `iv_stop` 与悬浮窗的叉，区别于可继续的三角。
+     */
+    @Test
+    fun listeningPageHasRealStopSeparateFromPause() {
+        listOf("竖屏" to layoutSource(), "横屏" to landscapeLayoutSource()).forEach { (name, layout) ->
+            assertTrue("$name 必须存在停止按钮 iv_stop", layout.contains("@+id/iv_stop"))
+            val stopBlock = slice(layout, "android:id=\"@+id/iv_stop\"", "/>")
+            assertTrue(
+                "$name 的停止按钮必须用方形停止图标（与三角暂停区分）",
+                stopBlock.contains("@drawable/ic_stop_black_24dp")
+            )
+        }
+
+        val body = slice(
+            activitySource(),
+            "private fun initControls(",
+            "private fun adjustProgressBy("
+        )
+        assertTrue(
+            "停止按钮必须调 ReadAloud.stop（结束会话，而非 pause）",
+            body.contains("ivStop.setOnClickListener")
+                    && body.contains("ReadAloud.stop(this@AudioPlayActivity)")
+        )
+        assertTrue(
+            "FAB 仍是暂停/继续语义，不得被改成停止",
+            body.contains("ReadAloud.pause(this@AudioPlayActivity)")
+                    && body.contains("ReadAloud.resume(this@AudioPlayActivity)")
+        )
+
+        val stateBody = slice(
+            activitySource(),
+            "private fun updatePlayState()",
+            "private fun updateCoverRotation("
+        )
+        assertTrue(
+            "无会话时停止按钮必须禁用（否则是点了没反应的假控件）",
+            stateBody.contains("ivStop.isEnabled = running")
         )
     }
 

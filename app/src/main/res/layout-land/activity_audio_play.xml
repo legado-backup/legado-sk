@@ -183,41 +183,63 @@
                 android:layout_height="1dp"
                 android:layout_weight="1" />
 
-            <androidx.constraintlayout.widget.ConstraintLayout
+            <LinearLayout
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content">
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
-                <com.google.android.material.floatingactionbutton.FloatingActionButton
-                    android:id="@+id/fab_play_stop"
+                <androidx.constraintlayout.widget.ConstraintLayout
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_margin="10dp"
-                    android:contentDescription="@string/audio_play"
-                    android:src="@drawable/ic_play_24dp"
-                    android:tint="@color/md_black_1000"
-                    app:backgroundTint="@color/md_white_1000"
-                    app:elevation="2dp"
-                    app:fabSize="normal"
-                    app:layout_constraintStart_toStartOf="parent"
-                    app:layout_constraintEnd_toEndOf="parent"
-                    app:layout_constraintBottom_toBottomOf="parent"
-                    app:layout_constraintTop_toTopOf="parent"
-                    app:pressedTranslationZ="2dp"
+                    android:layout_height="wrap_content">
+
+                    <com.google.android.material.floatingactionbutton.FloatingActionButton
+                        android:id="@+id/fab_play_stop"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_margin="10dp"
+                        android:contentDescription="@string/audio_play"
+                        android:src="@drawable/ic_play_24dp"
+                        android:tint="@color/md_black_1000"
+                        app:backgroundTint="@color/md_white_1000"
+                        app:elevation="2dp"
+                        app:fabSize="normal"
+                        app:layout_constraintStart_toStartOf="parent"
+                        app:layout_constraintEnd_toEndOf="parent"
+                        app:layout_constraintBottom_toBottomOf="parent"
+                        app:layout_constraintTop_toTopOf="parent"
+                        app:pressedTranslationZ="2dp"
+                        tools:ignore="ImageContrastCheck" />
+
+                    <io.legado.app.lib.theme.view.ThemeProgressBar
+                        android:id="@+id/progress_loading"
+                        android:layout_width="0dp"
+                        android:layout_height="0dp"
+                        android:visibility="invisible"
+                        app:layout_constraintWidth="parent"
+                        app:layout_constraintHeight="parent"
+                        app:layout_constraintBottom_toBottomOf="parent"
+                        app:layout_constraintEnd_toEndOf="parent"
+                        app:layout_constraintStart_toStartOf="parent"
+                        app:layout_constraintTop_toTopOf="parent" />
+
+                </androidx.constraintlayout.widget.ConstraintLayout>
+
+                <!-- 停止：正方形按钮语义，对照朗读面板的 iv_stop / 悬浮窗的叉。
+                     ⚠️ 与左侧三角（暂停，可继续）是两件事——停止会结束朗读会话、
+                     退出前台服务并清通知，是一去不回的。 -->
+                <io.legado.app.ui.widget.image.ImageButton
+                    android:id="@+id/iv_stop"
+                    android:layout_width="50dp"
+                    android:layout_height="50dp"
+                    android:background="@drawable/selector_circle_btn_bg"
+                    android:contentDescription="@string/stop"
+                    android:padding="12dp"
+                    android:src="@drawable/ic_stop_black_24dp"
+                    app:tint="@color/md_white_1000"
                     tools:ignore="ImageContrastCheck" />
 
-                <io.legado.app.lib.theme.view.ThemeProgressBar
-                    android:id="@+id/progress_loading"
-                    android:layout_width="0dp"
-                    android:layout_height="0dp"
-                    android:visibility="invisible"
-                    app:layout_constraintWidth="parent"
-                    app:layout_constraintHeight="parent"
-                    app:layout_constraintBottom_toBottomOf="parent"
-                    app:layout_constraintEnd_toEndOf="parent"
-                    app:layout_constraintStart_toStartOf="parent"
-                    app:layout_constraintTop_toTopOf="parent" />
-
-            </androidx.constraintlayout.widget.ConstraintLayout>
+            </LinearLayout>
 
             <View
                 android:layout_width="0dp"
