@@ -369,11 +369,38 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10087` 递增**（10086 为当前交付，已于 2026-10-12 发布 Pre-release）。
+> **下一次交付 versionCode 从 `10090` 递增**（10089 为当前交付，尚未发布 Release）。
 
 ---
 
-- ✅ **10086（`3.26.101215c`）——main 当前交付，✅ 已发布 Pre-release `v3.26.101215-10086`（2026-10-12）**（10083→10086 合并交付：听书「按章节定时」+ 音量增强改开关 + 朗读面板重排）：
+- ✅ **10089（`3.26.101419c`）——main 当前交付，尚未发布 Release**（听书页补「停止」+ 朗读设置页加「长按朗读直接进入听书页」开关）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。两个提交：`e5fe7537`（长按开关）、`feb3e17e`（听书页停止）。
+  - ⚠️ **本版是在 10086 基线上重建的**：10087–10091 那条线（原子写 + WAV 截断检测 + SoundTouch 音频链 + 配置热更新通知 + 听书页改造）经作者决定**整体撤销**，只把其中的**听书页改造 4 个提交**摘回来（`0cd398bb`/`17fe739d`/`f7035b55`/`724c036f`），并另按阅读C 口径修正在线语速（`78bd9f4d`）。
+    - ⚠️ **在线语速回归阅读C口径**：删除 SK 独有的 URL 子串启发式 `httpTtsSupportsServerSpeed()` 与播放端倍速兜底；经典 HTTP TTS 恒为 `1f`，语速由合成 URL 承载。**副作用**：URL 里不带 `speakSpeed/speechRate` 的源（如用户导入的「起点在线听书说书先生」）**失去**用户可调语速——作者已知悉并接受。
+    - ⚠️ 撤销线里的 `ReadAloudAudioChainGuardTest` **不在本基线**。
+  - **① 听书页补真正的「停止」（`feb3e17e`）**：本页原先只有一个 FAB，在 播放/暂停/继续 之间切换，**没有停止入口**。作者要求补上语义等于朗读面板 `iv_stop` / 悬浮窗「叉」的停止——**结束朗读会话、退出前台服务、清通知**，与可继续的三角是两件事。
+    - 传输行 FAB 右侧加 `iv_stop`（方形 `ic_stop_black_24dp`），**竖屏与横屏两份布局必须同步**；点击调 `ReadAloud.stop`，服务发 `Status.STOP` 后由 `observeLiveBus` 的 `ALOUD_STATE` 分支 `finish()` 本页。
+    - ⚠️ 无会话时 `ivStop.isEnabled = running` 必须禁用，否则是「点了没反应」的假控件。
+  - **② 朗读设置页加「长按朗读直接进入听书页」开关（`e5fe7537`）**：开 = 长按阅读菜单的「朗读」直接进听书页（`AudioPlayActivity`）；关（**默认**）= 维持旧行为弹出朗读控制面板。
+    - 长按改走**新增的** `onLongClickReadAloud` 回调，与 `showReadAloudDialog` 分开——**不要**改 `showReadAloudDialog`，悬浮窗那条 `EventBus.OPEN_READ_ALOUD_DIALOG` 路径共用它。
+    - ⚠️ 开关开启且未在朗读时，进听书页前**必须先起会话**（`ReadAloud.upReadAloudClass()` + `restartFromPage()`），否则页面打开后没有可控会话。
+    - ⚠️ 新开关**必须登记进 `ReadAloudConfigGroup` 的某个 `preferenceKeys`**，否则 `applyGroupFilter()` 会把整项隐藏，表现为「设置里根本没这一项」。
+    - ⚠️ `android:defaultValue` 与 `AppConfig` 读取默认值必须同为 `false`（§4「设置默认值」）。
+  - **回归锁**：`ReadAloudLongPressSwitchGuardTest`（3 项）+ `AudioPlayReadAloudSettingGuardTest` 新增 `listeningPageHasRealStopSeparateFromPause`。
+    - ⚠️ **方法论坑（本版踩到）**：仓库 `.kt` 是 **CRLF**，`File.readText()` **不归一化行尾**，按 `"\n\n"` 这类含换行的标记 `slice()` 会永远「找不到结束标记」。`moduleSource()` 统一 `.replace("\r\n", "\n")`。
+    - ⚠️ 开关类断言**不能只断言 key 存在**（key 在但没人读 = 开关点了没用），必须同时断言 xml 默认值、AppConfig 默认值、以及长按的两个分支。
+    - **2 项注入证伪均 RED**（摘 `ivStop` 接线 / 摘长按开关判断），证伪后已还原并复核。
+  - **验证**：全量单测 **274 项 / 10 失败**（＝既有已知 10 项 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增**）。
+  - **模拟器实机回归（`emulator-5554`，10087→10089 覆盖升级，`firstInstallTime` 不变）**：
+    - 设置页可见新开关「长按朗读直接进入听书页」，默认关；点击后 pref 落盘 `value="true"`。
+    - **开关开**：阅读页长按「朗读」→ 焦点直接到 `AudioPlayActivity`（旧面板路径不通）；听书页传输行可见 `语速 | 上一章 | FAB | ■ 停止 | 下一章 | 音量增强`。
+    - **点「停止」**：`HttpReadAloudService` 服务记录消失、朗读通知清空、`ReadAloudFloating` 窗口移除、焦点回 `ReadBookActivity`、0 崩溃（与「暂停」明确区分）。
+    - **开关关**：长按「朗读」→ 焦点仍是 `ReadBookActivity`，弹出旧朗读控制面板（截图确认）。
+  - **产物**：正式版 36,170,907 字节 ＋ 共存版 36,170,546 字节；均 `10089` / `3.26.101419c` / 阅读SK / arm64-v8a / 8 dex / 无 `debuggable` / apksigner exit 0。已收进 `release/`。
+    - ⚠️ 收集中**删除了上一版 10088 的两个 APK**（`3.26.101408c_10088`）——它是被撤销那条线的中间产物、**从未发布 Release**，已由 10089 取代；如需回溯可从分支 `backup-pre-revert-10091`（`4e577c7c`）重建。
+  - **下一次交付 versionCode 从 `10090` 递增。**
+
+- ✅ **10086（`3.26.101215c`）——历史交付，✅ 已发布 Pre-release `v3.26.101215-10086`（2026-10-12）**（10083→10086 合并交付：听书「按章节定时」+ 音量增强改开关 + 朗读面板重排）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。**交付物是 10086**；10083/10084/10085 均为本次迭代中间产物，无独立 Release。
   - **① 听书「按章节定时」（10083）**：档位只有 **本章 / 3 章 / 5 章**（作者指示，**不要**加 10 章档）。语义 = 引擎**自然读完 N 章后停止，且停在读完那一章的末尾、不进入下一章**。
     - ⚠️ **只消耗引擎自然推进**：`nextChapter(syncView)` 的拦截条件是 **`!syncView && timeChapter > 0`**；用户显式跳章（`syncView = true`）**既不消耗也不清零**。改成无条件递减会让手动翻页吃掉额度。
