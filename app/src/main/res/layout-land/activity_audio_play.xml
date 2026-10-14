@@ -244,7 +244,7 @@
                 android:id="@+id/iv_volume_gain"
                 android:layout_width="50dp"
                 android:layout_height="50dp"
-                android:background="@drawable/selector_circle_btn_bg"
+                android:background="@drawable/selector_circle_toggle_bg"
                 android:contentDescription="@string/read_aloud_volume_gain"
                 android:padding="6dp"
                 android:src="@drawable/ic_volume_up"

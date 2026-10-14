@@ -236,7 +236,9 @@ android {
                 "src/main/res/layout/activity_audio_play.xml",
                 "src/main/res/layout-land/activity_audio_play.xml",
                 "src/main/res/menu/audio_play.xml",
-                "src/main/res/xml/pref_config_aloud.xml"
+                "src/main/res/xml/pref_config_aloud.xml",
+                "src/main/res/drawable/selector_circle_toggle_bg.xml",
+                "src/main/res/drawable/selector_circle_btn_bg.xml"
         ).withPropertyName("audioPlayReadAloudSettingGuardResources")
                 .withPathSensitivity(PathSensitivity.RELATIVE)
         // ReadAloudConfigChangeGuardTest 断言配置热更的收口（不得再借用媒体键）。

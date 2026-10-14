@@ -292,12 +292,15 @@
                 android:layout_height="1dp"
                 android:layout_weight="1" />
 
-            <!-- 音量增强：开=固定 2 倍、关=不增强（仅两档，2 倍以上必然削波）。 -->
+            <!-- 音量增强：开=固定 2 倍、关=不增强（仅两档，2 倍以上必然削波）。
+                 ⚠️ 背景必须用带 state_selected 的 toggle 版本：selector_circle_btn_bg
+                 只有 state_pressed，用它时 isSelected 不产生任何视觉变化，
+                 表现为"点了没反馈"。 -->
             <io.legado.app.ui.widget.image.ImageButton
                 android:id="@+id/iv_volume_gain"
                 android:layout_width="50dp"
                 android:layout_height="50dp"
-                android:background="@drawable/selector_circle_btn_bg"
+                android:background="@drawable/selector_circle_toggle_bg"
                 android:contentDescription="@string/read_aloud_volume_gain"
                 android:padding="6dp"
                 android:src="@drawable/ic_volume_up"

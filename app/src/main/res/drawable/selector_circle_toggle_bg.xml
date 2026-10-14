@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 圆形图标按钮的「开关态」背景：选中填强调色、按下为浅灰圆。
+     ⚠️ 与 selector_circle_btn_bg 的区别：那个只有 state_pressed 一项，
+     用它做开关按钮时 isSelected 不产生任何视觉变化 —— 表现为"点了没反馈"。
+     需要可切换的圆按钮（音量增强等）一律用本 drawable。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true">
+        <shape android:shape="oval">
+            <solid android:color="@color/accent" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="oval">
+            <solid android:color="#60666666" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@android:color/transparent" />
+        </shape>
+    </item>
+</selector>

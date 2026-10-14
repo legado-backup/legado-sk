@@ -213,6 +213,41 @@ class AudioPlayReadAloudSettingGuardTest {
     }
 
     /**
+     * ⚠️ 开关型圆按钮必须用带 `state_selected` 的 drawable。
+     *
+     * 这是本版真实踩到的缺陷：`iv_volume_gain` 最初沿用 `selector_circle_btn_bg`，
+     * 而那个 drawable **只有 `state_pressed` 一项**，代码里设的 `isSelected`
+     * 不产生任何视觉变化 —— 用户表现为「点击无任何反馈」。
+     *
+     * 断言分两半，缺一不可：
+     * 1. 开关按钮的背景必须是有 selected 态的 drawable；
+     * 2. 被引用的那个 drawable 里必须真的写了 `state_selected`（防止指向一个空有名字的文件）。
+     */
+    @Test
+    fun toggleButtonsUseDrawableWithSelectedState() {
+        val toggleDrawable = moduleSource("src/main/res/drawable/selector_circle_toggle_bg.xml")
+        assertTrue(
+            "开关态 drawable 必须真的声明 state_selected，否则 isSelected 无视觉效果",
+            toggleDrawable.contains("android:state_selected=\"true\"")
+        )
+
+        listOf("竖屏" to layoutSource(), "横屏" to landscapeLayoutSource()).forEach { (name, layout) ->
+            val block = slice(layout, "android:id=\"@+id/iv_volume_gain\"", "/>")
+            assertTrue(
+                "$name 的音量增强按钮必须用带选中态的 selector_circle_toggle_bg",
+                block.contains("@drawable/selector_circle_toggle_bg")
+            )
+        }
+
+        // 反证：只有 pressed 态的旧 drawable 不得再被开关按钮使用
+        assertTrue(
+            "selector_circle_btn_bg 无法表达开关态（只有 state_pressed）",
+            !moduleSource("src/main/res/drawable/selector_circle_btn_bg.xml")
+                .contains("state_selected")
+        )
+    }
+
+    /**
      * 作者明确要求「控件位置对应回原版」：既有骨架控件不得被移除或改名。
      * 正文同步区是 SK 听书页相对其他分支的优势，不得被新改动挤掉。
      */
