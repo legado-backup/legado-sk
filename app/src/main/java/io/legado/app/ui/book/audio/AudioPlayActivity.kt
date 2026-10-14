@@ -48,6 +48,7 @@ import io.legado.app.help.book.AudioTextMapping
 import io.legado.app.help.book.BookImgClick
 import io.legado.app.help.book.ContentProcessor
 import io.legado.app.help.config.AppConfig
+import io.legado.app.help.exoplayer.VolumeGain
 import io.legado.app.help.book.isAudio
 import io.legado.app.help.book.isLocal
 import io.legado.app.help.book.isVideo
@@ -64,6 +65,7 @@ import io.legado.app.service.ReadAloudEngineType
 import io.legado.app.service.ReadAloudProgress
 import io.legado.app.service.SourceAudioReadAloudService
 import io.legado.app.ui.about.AppLogDialog
+import io.legado.app.ui.book.audio.SliderPopup.Companion.SPEED
 import io.legado.app.ui.book.audio.SliderPopup.Companion.TIMER
 import io.legado.app.ui.book.audio.config.AudioPlayDisplaySettingDialog
 import io.legado.app.ui.book.audio.config.AudioSkipCredits
@@ -98,6 +100,9 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
     override val binding by viewBinding(ActivityAudioPlayBinding::inflate)
     private val timerSliderPopup by lazy {
         SliderPopup(this, TIMER, ::updateSessionIndicators)
+    }
+    private val speedControlPopup by lazy {
+        SliderPopup(this, SPEED, ::updateSessionIndicators)
     }
     private var displayedProgress: ReadAloudProgress? = null
     private var trackingProgress = false
@@ -232,6 +237,19 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
         }
         ivRewind15?.setOnClickListener { adjustProgressBy(-progressStep()) }
         ivForward15?.setOnClickListener { adjustProgressBy(progressStep()) }
+        // 语速：听书页最常见的设置，放传输行左端（作者要求，不从设置里绕）。
+        // 复用既有 SliderPopup(SPEED)——它本身已分引擎（书源音频写 book.playSpeed，
+        // TTS 写 AppConfig.ttsSpeechRate 并通知服务）。
+        ivSpeedControl?.setOnClickListener {
+            speedControlPopup.showAsDropDown(it, 0, (-100).dpToPx(), Gravity.TOP)
+        }
+        // 音量增强：开 = 固定 2 倍、关 = 不增强。AppConfig.ttsVolumeGain 的 setter
+        // 内部已 VolumeGain.refresh()，故点击后立即生效，无需再通知服务。
+        ivVolumeGain?.setOnClickListener {
+            AppConfig.ttsVolumeGain =
+                if (AppConfig.ttsVolumeGain > 0) 0 else VolumeGain.MAX_PERCENT
+            updateVolumeGainUi()
+        }
         // 四个功能胶囊（Rimchars FeaturePill 语义）：目录 / 定时 / 引擎 / 角色。
         // 胶囊内自带图标与文字，点击落在整条胶囊上，不再依赖单个圆按钮。
         llPillChapter?.setOnClickListener { tocActivityResult.launch(book.bookUrl) }
@@ -274,6 +292,7 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
     private fun updateEngineUi() = binding.run {
         bindListeningText()
         updateEngineBadge()
+        updateVolumeGainUi()
         invalidateOptionsMenu()
     }
 
@@ -301,6 +320,23 @@ class AudioPlayActivity : BaseActivity<ActivityAudioPlayBinding>(toolBarTheme = 
                 ?: getString(R.string.http_tts_missing, ttsEngine)
         }
         return ReadAloud.selectedEngineLabel() ?: getString(R.string.system_tts)
+    }
+
+    /**
+     * 音量增强按钮的状态：开时高亮（选中态），关时普通。
+     *
+     * ⚠️ 音量增强是 TTS 播放链的处理链增益（[io.legado.app.help.exoplayer.VolumeGainAudioProcessor]），
+     * **书源音频不走这条链**（`SourceAudioReadAloudService` 自建 ExoPlayer），
+     * 故书源音频下该按钮隐藏，避免点了没反应的假控件。
+     */
+    private fun updateVolumeGainUi() = binding.run {
+        val button = ivVolumeGain ?: return@run
+        if (ReadAloud.selectedEngineType == ReadAloudEngineType.SOURCE_AUDIO) {
+            button.gone()
+            return@run
+        }
+        button.visible()
+        button.isSelected = AppConfig.ttsVolumeGain > 0
     }
 
     /**

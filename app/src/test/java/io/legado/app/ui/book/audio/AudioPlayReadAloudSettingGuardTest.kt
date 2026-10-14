@@ -166,6 +166,53 @@ class AudioPlayReadAloudSettingGuardTest {
     }
 
     /**
+     * 语速与音量增强必须在听书页面上（作者要求：这是听书页最常见的两个设置，
+     * 不要收进设置里绕）。两者都必须真的接上，且书源音频下音量增强要隐藏
+     * （它走 TTS 处理链，书源音频自建 ExoPlayer 不经过该链，否则是假控件）。
+     */
+    @Test
+    fun speedAndVolumeGainAreOnTheListeningPage() {
+        listOf("竖屏" to layoutSource(), "横屏" to landscapeLayoutSource()).forEach { (name, layout) ->
+            listOf("iv_speed_control", "iv_volume_gain").forEach { id ->
+                assertTrue(
+                    "$name 布局必须在传输行上放 $id（语速/音量增强是听书页常见设置）",
+                    layout.contains("@+id/$id")
+                )
+            }
+        }
+
+        val body = slice(
+            activitySource(),
+            "private fun initControls(",
+            "private fun adjustProgressBy("
+        )
+        assertTrue(
+            "语速按钮必须弹出语速滑条（复用既有 SliderPopup(SPEED)，它已分引擎）",
+            body.contains("ivSpeedControl?.setOnClickListener")
+                    && body.contains("speedControlPopup.showAsDropDown")
+        )
+        assertTrue(
+            "音量增强按钮必须真的切换设置（二档：0 / VolumeGain.MAX_PERCENT）",
+            body.contains("AppConfig.ttsVolumeGain =")
+                    && body.contains("VolumeGain.MAX_PERCENT")
+        )
+
+        val gainBody = slice(
+            activitySource(),
+            "private fun updateVolumeGainUi()",
+            "private fun applyDisplaySettings()"
+        )
+        assertTrue(
+            "书源音频不经过 TTS 增益链，音量增强按钮必须隐藏（否则是点了没反应的假控件）",
+            gainBody.contains("SOURCE_AUDIO") && gainBody.contains("gone()")
+        )
+        assertTrue(
+            "音量增强按钮必须反映当前开关状态",
+            gainBody.contains("isSelected = AppConfig.ttsVolumeGain > 0")
+        )
+    }
+
+    /**
      * 作者明确要求「控件位置对应回原版」：既有骨架控件不得被移除或改名。
      * 正文同步区是 SK 听书页相对其他分支的优势，不得被新改动挤掉。
      */

@@ -152,6 +152,22 @@
             android:orientation="horizontal">
 
             <io.legado.app.ui.widget.image.ImageButton
+                android:id="@+id/iv_speed_control"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                android:background="@drawable/selector_circle_btn_bg"
+                android:contentDescription="@string/speed_control"
+                android:padding="6dp"
+                android:src="@drawable/ic_speed_control"
+                app:tint="@color/md_white_1000"
+                tools:ignore="ImageContrastCheck" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <io.legado.app.ui.widget.image.ImageButton
                 android:id="@+id/iv_skip_previous"
                 android:layout_width="50dp"
                 android:layout_height="50dp"
@@ -216,6 +232,22 @@
                 android:contentDescription="@string/skip_next"
                 android:padding="6dp"
                 android:src="@drawable/ic_skip_next"
+                app:tint="@color/md_white_1000"
+                tools:ignore="ImageContrastCheck" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <io.legado.app.ui.widget.image.ImageButton
+                android:id="@+id/iv_volume_gain"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                android:background="@drawable/selector_circle_btn_bg"
+                android:contentDescription="@string/read_aloud_volume_gain"
+                android:padding="6dp"
+                android:src="@drawable/ic_volume_up"
                 app:tint="@color/md_white_1000"
                 tools:ignore="ImageContrastCheck" />
 

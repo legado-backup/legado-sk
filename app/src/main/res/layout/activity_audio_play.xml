@@ -194,14 +194,30 @@
         android:paddingEnd="12dp"
         app:layout_constraintBottom_toBottomOf="parent">
 
-        <!-- 传输控制行：上一章 / 播放暂停 / 下一章。
-             15 秒快退快进与进度条同排（ll_player_progress），此处只保留三键，
-             对齐 Rimchars 的 RoundTransportButton 排布。 -->
+        <!-- 传输控制行：语速 / 上一章 / 播放暂停 / 下一章 / 音量增强。
+             语速与音量增强是听书页最常见的两个设置，按作者要求放这一行而不是收进设置；
+             两端留出对称位置，中间保持"传输三键"居中的原有语义。 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal">
+
+            <io.legado.app.ui.widget.image.ImageButton
+                android:id="@+id/iv_speed_control"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                android:background="@drawable/selector_circle_btn_bg"
+                android:contentDescription="@string/speed_control"
+                android:padding="6dp"
+                android:src="@drawable/ic_speed_control"
+                app:tint="@color/md_white_1000"
+                tools:ignore="ImageContrastCheck" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
 
             <io.legado.app.ui.widget.image.ImageButton
                 android:id="@+id/iv_skip_previous"
@@ -268,6 +284,23 @@
                 android:contentDescription="@string/skip_next"
                 android:padding="6dp"
                 android:src="@drawable/ic_skip_next"
+                app:tint="@color/md_white_1000"
+                tools:ignore="ImageContrastCheck" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <!-- 音量增强：开=固定 2 倍、关=不增强（仅两档，2 倍以上必然削波）。 -->
+            <io.legado.app.ui.widget.image.ImageButton
+                android:id="@+id/iv_volume_gain"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                android:background="@drawable/selector_circle_btn_bg"
+                android:contentDescription="@string/read_aloud_volume_gain"
+                android:padding="6dp"
+                android:src="@drawable/ic_volume_up"
                 app:tint="@color/md_white_1000"
                 tools:ignore="ImageContrastCheck" />
 
