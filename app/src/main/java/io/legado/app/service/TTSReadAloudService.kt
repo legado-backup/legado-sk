@@ -97,9 +97,6 @@ class TTSReadAloudService : BaseReadAloudService() {
     @Volatile
     private var wavPausedPlayback = false
 
-    /** 收尾阈值：当前句剩余不足该毫秒数时不再为调语速而重启（约三五个字）。 */
-    private val wavTailGuardMs = 800L
-
     // ---- 实时缓存：任务列表 + 在途合成 ----
     // 每当新的朗读单元成为当前单元：先解决当前段三态（命中→直接播；在途→等
     // 合成完成回调；缺失→立即派发，排在引擎队列最前），随后重建任务列表
@@ -587,8 +584,8 @@ class TTSReadAloudService : BaseReadAloudService() {
         wavPosJob = lifecycleScope.launch {
             val duration = wavPlayer.duration
             // 锚点必须取真实播放位置，不能用本句句首：
-            // 调语速会 playStop()+play() 重播当前句（upSpeechRate），本函数随之重启，
-            // 锚在句首会把朗读位置拉回本句开头，表现为「拖语速跳进度」。
+            // 本函数在句内多次进入（暂停恢复/换句），锚在句首会把朗读位置
+            // 拉回本句开头，表现为「拖语速跳进度」。
             val anchor = if (duration > 0) {
                 (utteranceLen.toLong() * wavPlayer.currentPosition / duration).toInt()
                     .coerceIn(0, utteranceLen)
@@ -917,33 +914,12 @@ class TTSReadAloudService : BaseReadAloudService() {
                 initTts()
             }
         } else {
-            val speechRate = (AppConfig.ttsSpeechRate + 5) / 10f
-            textToSpeech?.setSpeechRate(speechRate)
-            if (reset && !pause && ttsInitFinish) {
-                // 当前句已接近播完时不再重启：playStop() 会清掉播放器现场并重播本句，
-                // 而推进逻辑此时正准备切下一段，两者相撞会让位置在段交界处跳变。
-                // 让它自然播完，STATE_ENDED → advanceWavParagraph() 自动切段，
-                // 新语速从下一段起生效（引擎语速已在上面设好）。
-                if (isCurrentWavUtteranceAlmostFinished()) {
-                    return
-                }
-                playStop()
-                play()
-            }
+            // 语速只设给引擎，不重启朗读会话：实测拖语速打断引擎 live 会话后，
+            // live 会话后，预加载队列被瞬间逐句"完成"（每句 5~10ms），朗读游标被
+            // 拽过整个预加载窗口，下一次重启音频直接跳到游标位置——段首/句尾拖动
+            // 必现跳进度（模拟器+真机 logcat 证实）。新语速从下一句自然生效。
+            textToSpeech?.setSpeechRate((AppConfig.ttsSpeechRate + 5) / 10f)
         }
-    }
-
-    /**
-     * wav 模式下当前句是否已接近播完（剩余不足一个收尾阈值）。
-     * 用于调语速时判断能否安全重启当前句：接近结尾时重启会与切段推进相撞。
-     */
-    private fun isCurrentWavUtteranceAlmostFinished(): Boolean {
-        if (!AppConfig.ttsWavMode) return false
-        val duration = runCatching { wavPlayer.duration }.getOrDefault(0L)
-        if (duration <= 0) return false
-        val remaining = duration - runCatching { wavPlayer.currentPosition }.getOrDefault(0L)
-        // 剩余不足 800ms（约三五个字）视为即将收尾
-        return remaining in 1..wavTailGuardMs
     }
 
     override fun pauseReadAloud(abandonFocus: Boolean) {

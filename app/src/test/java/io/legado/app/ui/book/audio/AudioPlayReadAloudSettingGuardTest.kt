@@ -1,5 +1,6 @@
 package io.legado.app.ui.book.audio
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -442,37 +443,33 @@ class AudioPlayReadAloudSettingGuardTest {
     }
 
     /**
-     * 调语速在**段落收尾期**不得重启当前句。
+     * 调语速**一律不得重启朗读会话**（playStop()+play()）。
      *
-     * 当前句只剩三五个字时，推进逻辑正准备切下一段；此时 `playStop()+play()`
-     * 会清掉播放器现场并重播本句，与切段相撞 → 位置在段交界处跳变（实测可复现）。
-     * 正确做法：收尾期只改引擎语速让它自然播完，由 STATE_ENDED → advanceWavParagraph()
-     * 切段，新语速从下一段生效。
+     * 实测（模拟器+真机 logcat，10093）：speak 队列模式下拖语速触发会话重启，
+     * multiTTS 的 live 会话被打断后预加载队列被瞬间逐句"完成"（每句 5~10ms），
+     * 朗读游标被拽过整个预加载窗口（0.3s 内 2298→2699，十个段落），下一次
+     * 重启时音频直接跳到游标位置——段首/句尾拖动必现跳进度。
+     * 正确做法：只把新语速设给引擎（setSpeechRate），不重启，新语速从下一句生效。
      */
     @Test
-    fun speechRateChangeSkipsRestartNearUtteranceEnd() {
+    fun speechRateChangeNeverRestartsSession() {
         val source = moduleSource(
             "src/main/java/io/legado/app/service/TTSReadAloudService.kt"
         )
         val body = slice(source, "override fun upSpeechRate(reset: Boolean)", "\n    }\n")
 
         assertTrue(
-            "调语速前必须先把新语速设给引擎（收尾期不重启也能生效）",
-            body.contains("textToSpeech?.setSpeechRate(speechRate)")
+            "调语速必须先把新语速设给引擎（不重启也能对当前/后续句生效）",
+            body.contains("setSpeechRate")
         )
         assertTrue(
-            "收尾期必须提前返回，不得再 playStop()+play() 重播当前句",
-            body.contains("isCurrentWavUtteranceAlmostFinished()")
+            "调语速不得重启会话：playStop()+play() 会打断引擎 live 会话，" +
+                "预加载队列被瞬间清空导致跳进度（实测 2298→2699）",
+            !body.contains("playStop()")
         )
-        // 守卫必须排在重启之前：先重启再判断等于没守。
-        // ⚠️ 用 lastIndexOf：上方注释里也含 playStop() 字面量，indexOf 会先命中注释而假红。
-        assertTrue(
-            "收尾守卫必须排在 playStop() 调用之前（先重启再判断等于没守）",
-            body.indexOf("isCurrentWavUtteranceAlmostFinished()") < body.lastIndexOf("playStop()")
-        )
-        assertTrue(
-            "必须存在收尾判定实现",
-            source.contains("private fun isCurrentWavUtteranceAlmostFinished()")
+        assertFalse(
+            "收尾守卫（isCurrentWavUtteranceAlmostFinished）随重启路径一并删除，不得残留",
+            source.contains("isCurrentWavUtteranceAlmostFinished")
         )
     }
 
