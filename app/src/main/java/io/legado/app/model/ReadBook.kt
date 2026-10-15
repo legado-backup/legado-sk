@@ -566,6 +566,23 @@ object ReadBook : CoroutineScope by MainScope() {
     }
 
     /**
+     * 朗读跨章挂起恢复：`pendingReadAloudChapterSync` 只由 [curPageChanged] 消费，
+     * 而上一/下一章预加载排版完成时（contentLoadFinish 的 offset==±1 分支）不回调
+     * curPageChanged——若朗读跨章时预加载章尚未排版完成，跨章后该章排版完成便无人
+     * 触发恢复，朗读会停驻在章节连接处（服务存活、非暂停非停止）。
+     * 此处补上：预加载排版完成后若该章已被交换为当前显示章，且挂起标志仍在，
+     * 就以真实状态走一次 curPageChanged 完成续播（或保持挂起等下一次）。
+     */
+    private fun ensureReadAloudPendingSyncResumed(chapter: TextChapter) {
+        if (!pendingReadAloudChapterSync) return
+        if (chapter.chapter.index != durChapterIndex) return
+        AppLog.putDebug(
+            "[朗读] 预加载章排版完成，补发跨章恢复回调 ch:${chapter.chapter.index}"
+        )
+        curPageChanged()
+    }
+
+    /**
      * 朗读
      */
     fun readAloud(
@@ -927,6 +944,7 @@ object ReadBook : CoroutineScope by MainScope() {
                     }
                     textChapter.layoutChannel.receiveAsFlow().collect()
                     if (upContent) callBack?.upContent(offset, resetPageOffset)
+                    ensureReadAloudPendingSyncResumed(textChapter)
                 }
 
                 1 -> nextChapterLoadingLock.withLock {
@@ -941,6 +959,7 @@ object ReadBook : CoroutineScope by MainScope() {
                         }
                         if (upContent) callBack?.upContent(offset, resetPageOffset)
                     }
+                    ensureReadAloudPendingSyncResumed(textChapter)
                 }
             }
 

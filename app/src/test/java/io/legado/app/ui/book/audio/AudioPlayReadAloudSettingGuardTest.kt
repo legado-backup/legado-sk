@@ -475,4 +475,55 @@ class AudioPlayReadAloudSettingGuardTest {
             source.contains("private fun isCurrentWavUtteranceAlmostFinished()")
         )
     }
+
+    /**
+     * 朗读跨章挂起恢复不得依赖「永远不会来的回调」。
+     *
+     * 朗读跨章时若预加载的下一章尚未排版完成，恢复只挂 `pendingReadAloudChapterSync`
+     * 标志；该标志只由 `curPageChanged` 消费，而预加载分支（contentLoadFinish 的
+     * offset==±1）排版完成后**不回调** curPageChanged → 朗读停驻在章节连接处
+     * （服务存活、非暂停非停止，手动介入才恢复）。修法：预加载排版完成后，
+     * 若该章已被交换为当前显示章，补发一次 curPageChanged。
+     */
+    @Test
+    fun pendingReadAloudSyncResumesWhenPreloadedChapterFinishesLayout() {
+        val source = moduleSource(
+            "src/main/java/io/legado/app/model/ReadBook.kt"
+        )
+
+        val helperAt = source.indexOf("private fun ensureReadAloudPendingSyncResumed")
+        assertTrue("必须存在预加载排版完成的恢复入口", helperAt >= 0)
+        val helperBody = slice(
+            source,
+            "private fun ensureReadAloudPendingSyncResumed",
+            "curPageChanged()"
+        )
+        assertTrue(
+            "恢复前必须先确认挂起标志仍在（无标志不得乱发回调）",
+            helperBody.contains("if (!pendingReadAloudChapterSync) return")
+        )
+        assertTrue(
+            "恢复前必须确认该章已是当前显示章（否则预加载未消费时就抢播）",
+            helperBody.contains("chapter.chapter.index != durChapterIndex")
+        )
+
+        // 上一章 / 下一章两个预加载分支都必须挂上恢复钩子
+        val callCount = Regex("ensureReadAloudPendingSyncResumed\\(textChapter\\)")
+            .findAll(source).count()
+        assertTrue(
+            "上一章与下一章预加载分支都要挂恢复钩子（实际 $callCount 处）",
+            callCount >= 2
+        )
+
+        // 钩子必须排在排版通道消费完之后（channel collect/for 之后），否则排版未完成就触发
+        val nextBranch = slice(
+            source,
+            "1 -> nextChapterLoadingLock.withLock",
+            "ensureReadAloudPendingSyncResumed(textChapter)"
+        )
+        assertTrue(
+            "下一章分支的钩子必须等排版通道消费完",
+            nextBranch.contains("textChapter.layoutChannel")
+        )
+    }
 }
