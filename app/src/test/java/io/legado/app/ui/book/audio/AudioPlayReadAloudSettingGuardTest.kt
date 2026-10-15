@@ -440,4 +440,39 @@ class AudioPlayReadAloudSettingGuardTest {
                 body.indexOf("if (pageSplit) return@launch")
         )
     }
+
+    /**
+     * 调语速在**段落收尾期**不得重启当前句。
+     *
+     * 当前句只剩三五个字时，推进逻辑正准备切下一段；此时 `playStop()+play()`
+     * 会清掉播放器现场并重播本句，与切段相撞 → 位置在段交界处跳变（实测可复现）。
+     * 正确做法：收尾期只改引擎语速让它自然播完，由 STATE_ENDED → advanceWavParagraph()
+     * 切段，新语速从下一段生效。
+     */
+    @Test
+    fun speechRateChangeSkipsRestartNearUtteranceEnd() {
+        val source = moduleSource(
+            "src/main/java/io/legado/app/service/TTSReadAloudService.kt"
+        )
+        val body = slice(source, "override fun upSpeechRate(reset: Boolean)", "\n    }\n")
+
+        assertTrue(
+            "调语速前必须先把新语速设给引擎（收尾期不重启也能生效）",
+            body.contains("textToSpeech?.setSpeechRate(speechRate)")
+        )
+        assertTrue(
+            "收尾期必须提前返回，不得再 playStop()+play() 重播当前句",
+            body.contains("isCurrentWavUtteranceAlmostFinished()")
+        )
+        // 守卫必须排在重启之前：先重启再判断等于没守。
+        // ⚠️ 用 lastIndexOf：上方注释里也含 playStop() 字面量，indexOf 会先命中注释而假红。
+        assertTrue(
+            "收尾守卫必须排在 playStop() 调用之前（先重启再判断等于没守）",
+            body.indexOf("isCurrentWavUtteranceAlmostFinished()") < body.lastIndexOf("playStop()")
+        )
+        assertTrue(
+            "必须存在收尾判定实现",
+            source.contains("private fun isCurrentWavUtteranceAlmostFinished()")
+        )
+    }
 }
