@@ -241,6 +241,16 @@ android {
                 "src/main/res/drawable/selector_circle_btn_bg.xml"
         ).withPropertyName("audioPlayReadAloudSettingGuardResources")
                 .withPathSensitivity(PathSensitivity.RELATIVE)
+        // 一批守卫测试直接读 .kt 源码文本做静态断言（ReadAloudPanelPositionGuardTest 等）。
+        // ⚠️ 源码不是 Test 任务的默认输入，只改被断言的 .kt 而不动测试类本身时，
+        // 任务会命中 build cache 复用旧结果，断言变成"看起来在断言、实际没执行"——
+        // 注入证伪时实测踩到（真删了被断言的代码行，测试却仍全绿）。
+        inputs.files(
+                "src/main/java/io/legado/app/ui/book/read/ReadBookActivity.kt",
+                "src/main/java/io/legado/app/ui/book/read/page/ReadView.kt",
+                "src/main/java/io/legado/app/ui/book/read/page/PageView.kt"
+        ).withPropertyName("readAloudPanelPositionGuardSources")
+                .withPathSensitivity(PathSensitivity.RELATIVE)
     }
     lint { //忽略string翻译缺失，后面需要翻译时去掉，todo
         checkDependencies = false
