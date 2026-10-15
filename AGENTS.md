@@ -369,11 +369,31 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10095` 递增**（10094 为当前交付，本条随发布更新）。
+> **下一次交付 versionCode 从 `10096` 递增**（10095 为当前交付，本条随发布更新）。
 
 ---
 
-- ✅ **10094（`3.26.101530c`）——main 当前交付，✅ 已发布 Pre-release（2026-10-15）**（朗读 bug 修复 + 朗读界面更新）：
+- ✅ **10095（`3.26.101518c`）——main 当前交付，⚠️ 尚未发布 Release**（修复朗读底部面板偶发贴屏底）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。两个提交：`a78b1719`（重放 10024 面板定位修复 + 回归锁）、`e4d6b57d`（测试输入声明，堵假绿）。
+  - **① 重放 10024「朗读面板定位就绪才显示」（`a78b1719`）**：作者报「听书底部悬浮窗（暂停/继续）有时贴着屏幕底部，呼出菜单再退回又恢复正常」。
+    - **定性结论（作者问「是我版本的问题还是上游就有的」）：两边都沾，但根子在 SK 侧**——
+      - **上游（阅读C）本身就有此缺陷**：`showReadAloudPlaybackPanel` 是「先 `visible()`，再在 `doOnLayout` 里算 margin」的原生写法（`upstream/own` 与 10094 逐字相同，**上游至今未修**）。
+      - **但 SK 10024（`bc78a134`）已修过**，`10025/10026/10027/10029/10030/10033/10035` 都带着修复；**10036（2026-09-08）「重植上游基线 + 逐项重放 SK 定制」时这条定制没被重放**，缺陷回归并持续到 10094。判据：`git merge-base --is-ancestor bc78a134 HEAD` → 否；该 helper 在 HEAD 全库 0 命中。
+    - **机制**：面板布局是 `layout_marginBottom=0dp` + `layout_gravity=bottom`（`activity_book_read.xml`），校正值只能异步算（依赖 readView 高度与页脚位置）→ ① `visible()` 到回调之间面板已按贴底位置布局过一次；② 回调开头的**三重 mode 校验任一失败就 `return`**，此后再无人补，面板**永久**贴底。菜单切换会重跑 `showReadAloudPanel` **给第二次机会**，故作者观察为「偶发、菜单一进一出就好」。
+    - **修法（按 10024 原文重放）**：`ReadBookActivity` 新增 `tryReadAloudPanelBottomMargin`（未就绪返回 `null` 而非抛异常）与 `positionAndRevealReadAloudPanel`（先定位后显示；未就绪则挂 `OnGlobalLayoutListener` 重试并保持隐藏）；两个面板统一走该入口；删除旧同步校正 `readAloudPanelBottomMargin`。`ReadView`/`PageView` 新增 `footerMeasurable`。
+    - ⚠️ **重放 SK 定制时最容易漏的就是这种「上游原生写法 + SK 后修补丁」**：重植基线会把它一起退回上游形态，而它不在任何上游提交里，`git log -S <新符号名>` 在 main 上也查不到（10024 的提交不在 HEAD 祖先链）。**核对方法**：对每个 SK 定制按「符号名」在 HEAD 全库 grep，命中 0 就是丢了。
+  - **② 回归锁 `ReadAloudPanelPositionGuardTest`（`a78b1719`，3 项）**：
+    - `footerMeasurableIsExposedThroughBothLayers`、`panelsArePositionedBeforeRevealed`、`legacySynchronousMarginHelperIsGone`。
+    - **4 轮注入证伪全部 RED，且每轮命中对应断言**：删 `panel.gone()` 行 / 回退成先 `visible()` / 回退 `doOnLayout` / `PageView.footerMeasurable` 判据改恒 `true`。
+    - ⚠️ **本版两个假绿陷阱（都实测踩到，务必复用）**：
+      1. **`.kt` 不是 Test 任务的默认输入** → 只改被断言的源码、不动测试类时会命中 build cache **复用旧结果**（真删了被断言的代码行，测试仍报全绿）。已把三个源文件加进 `app/build.gradle` 的 `tasks.withType(Test)` `inputs.files`（`e4d6b57d`）。⚠️ 与 §4 里为 `res/` 资源做过的同类声明是**同一个问题**，对象换成了 `.kt`。
+      2. **断言必须去注释后再比对** → `// panel.gone()` 一样能喂饱 `contains("panel.gone()")`。本测试加了 `stripComments()`（逐字符扫描，跳过字符串/三引号原始串，注释替换为等量空白以保持行号）。
+  - **验证**：全量单测 **281 项 / 10 失败**（＝既有已知 10 项 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增**；278+3 新）。
+  - **模拟器回归（`emulator-5554`）**：正式版 `io.legado.app.c` 10087→10095 覆盖升级（`firstInstallTime` 不变）、共存版 10094→10095 覆盖升级（不变）；启动朗读后 `read_aloud_playback_panel` 落在 `y=1787`（面板底 1859，**非屏底 1920**），截图确认面板位于页脚「第1章(1) / 4/24」**上方**。
+  - **产物**：正式版 36,171,598 字节 ＋ 共存版 36,171,327 字节；均 `10095` / `3.26.101518c` / 阅读SK / arm64-v8a / 8 dex / apksigner exit 0。已收进 `release/`（3 文件约定形态，已删 10094 两件套）。
+  - **下一次交付 versionCode 从 `10096` 递增。**
+
+- ✅ **10094（`3.26.101530c`）——历史交付，✅ 已发布 Pre-release（2026-10-15）**（朗读 bug 修复 + 朗读界面更新）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。六个提交：`58bb4e4f`（恢复播放端倍速兜底）、`7dfd9107`（HTTP 句内锚点）、`51d6329b`（TTS 句内锚点）、`e2c4758f`（句尾收尾守卫）、`c0dbc9f9`（跨章恢复回调）、`d3a79ac7`（调语速不重启会话）。
   - **① 恢复「URL 无占位符的源走播放端倍速兜底」（`58bb4e4f`）**：恢复 10089 撤掉的 `httpTtsSupportsServerSpeed()` 子串启发式与播放端倍速兜底——实测该兜底是真功能（转发器 multiTTS 等无语速占位符的源靠它实现可调语速）。判定结果落日志（`服务端变速判定：…`）。
   - **② 拖语速跳进度根治（`7dfd9107`/`51d6329b`/`d3a79ac7`）**：作者报「拖语速跳进度，往前往后都算」。
@@ -389,111 +409,7 @@ uiautomator2 / ADB
     - ⚠️ 10090–10093 为 sk2-only 诊断/验证构建（位置探针、边界修复验证），不发布、不入 `release/`。
   - **下一次交付 versionCode 从 `10095` 递增。**
 
-- ✅ **10089（`3.26.101419c`）——历史交付，尚未发布 Release**（听书页补「停止」+ 朗读设置页加「长按朗读直接进入听书页」开关）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。两个提交：`e5fe7537`（长按开关）、`feb3e17e`（听书页停止）。
-  - ⚠️ **本版是在 10086 基线上重建的**：10087–10091 那条线（原子写 + WAV 截断检测 + SoundTouch 音频链 + 配置热更新通知 + 听书页改造）经作者决定**整体撤销**，只把其中的**听书页改造 4 个提交**摘回来（`0cd398bb`/`17fe739d`/`f7035b55`/`724c036f`），并另按阅读C 口径修正在线语速（`78bd9f4d`）。
-    - ⚠️ **在线语速回归阅读C口径**：删除 SK 独有的 URL 子串启发式 `httpTtsSupportsServerSpeed()` 与播放端倍速兜底；经典 HTTP TTS 恒为 `1f`，语速由合成 URL 承载。**副作用**：URL 里不带 `speakSpeed/speechRate` 的源（如用户导入的「起点在线听书说书先生」）**失去**用户可调语速——作者已知悉并接受。
-    - ⚠️ 撤销线里的 `ReadAloudAudioChainGuardTest` **不在本基线**。
-  - **① 听书页补真正的「停止」（`feb3e17e`）**：本页原先只有一个 FAB，在 播放/暂停/继续 之间切换，**没有停止入口**。作者要求补上语义等于朗读面板 `iv_stop` / 悬浮窗「叉」的停止——**结束朗读会话、退出前台服务、清通知**，与可继续的三角是两件事。
-    - 传输行 FAB 右侧加 `iv_stop`（方形 `ic_stop_black_24dp`），**竖屏与横屏两份布局必须同步**；点击调 `ReadAloud.stop`，服务发 `Status.STOP` 后由 `observeLiveBus` 的 `ALOUD_STATE` 分支 `finish()` 本页。
-    - ⚠️ 无会话时 `ivStop.isEnabled = running` 必须禁用，否则是「点了没反应」的假控件。
-  - **② 朗读设置页加「长按朗读直接进入听书页」开关（`e5fe7537`）**：开 = 长按阅读菜单的「朗读」直接进听书页（`AudioPlayActivity`）；关（**默认**）= 维持旧行为弹出朗读控制面板。
-    - 长按改走**新增的** `onLongClickReadAloud` 回调，与 `showReadAloudDialog` 分开——**不要**改 `showReadAloudDialog`，悬浮窗那条 `EventBus.OPEN_READ_ALOUD_DIALOG` 路径共用它。
-    - ⚠️ 开关开启且未在朗读时，进听书页前**必须先起会话**（`ReadAloud.upReadAloudClass()` + `restartFromPage()`），否则页面打开后没有可控会话。
-    - ⚠️ 新开关**必须登记进 `ReadAloudConfigGroup` 的某个 `preferenceKeys`**，否则 `applyGroupFilter()` 会把整项隐藏，表现为「设置里根本没这一项」。
-    - ⚠️ `android:defaultValue` 与 `AppConfig` 读取默认值必须同为 `false`（§4「设置默认值」）。
-  - **回归锁**：`ReadAloudLongPressSwitchGuardTest`（3 项）+ `AudioPlayReadAloudSettingGuardTest` 新增 `listeningPageHasRealStopSeparateFromPause`。
-    - ⚠️ **方法论坑（本版踩到）**：仓库 `.kt` 是 **CRLF**，`File.readText()` **不归一化行尾**，按 `"\n\n"` 这类含换行的标记 `slice()` 会永远「找不到结束标记」。`moduleSource()` 统一 `.replace("\r\n", "\n")`。
-    - ⚠️ 开关类断言**不能只断言 key 存在**（key 在但没人读 = 开关点了没用），必须同时断言 xml 默认值、AppConfig 默认值、以及长按的两个分支。
-    - **2 项注入证伪均 RED**（摘 `ivStop` 接线 / 摘长按开关判断），证伪后已还原并复核。
-  - **验证**：全量单测 **274 项 / 10 失败**（＝既有已知 10 项 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增**）。
-  - **模拟器实机回归（`emulator-5554`，10087→10089 覆盖升级，`firstInstallTime` 不变）**：
-    - 设置页可见新开关「长按朗读直接进入听书页」，默认关；点击后 pref 落盘 `value="true"`。
-    - **开关开**：阅读页长按「朗读」→ 焦点直接到 `AudioPlayActivity`（旧面板路径不通）；听书页传输行可见 `语速 | 上一章 | FAB | ■ 停止 | 下一章 | 音量增强`。
-    - **点「停止」**：`HttpReadAloudService` 服务记录消失、朗读通知清空、`ReadAloudFloating` 窗口移除、焦点回 `ReadBookActivity`、0 崩溃（与「暂停」明确区分）。
-    - **开关关**：长按「朗读」→ 焦点仍是 `ReadBookActivity`，弹出旧朗读控制面板（截图确认）。
-  - **产物**：正式版 36,170,907 字节 ＋ 共存版 36,170,546 字节；均 `10089` / `3.26.101419c` / 阅读SK / arm64-v8a / 8 dex / 无 `debuggable` / apksigner exit 0。已收进 `release/`。
-    - ⚠️ 收集中**删除了上一版 10088 的两个 APK**（`3.26.101408c_10088`）——它是被撤销那条线的中间产物、**从未发布 Release**，已由 10089 取代；如需回溯可从分支 `backup-pre-revert-10091`（`4e577c7c`）重建。
-  - **下一次交付 versionCode 从 `10090` 递增。**
-
-- ✅ **10086（`3.26.101215c`）——历史交付，✅ 已发布 Pre-release `v3.26.101215-10086`（2026-10-12）**（10083→10086 合并交付：听书「按章节定时」+ 音量增强改开关 + 朗读面板重排）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。**交付物是 10086**；10083/10084/10085 均为本次迭代中间产物，无独立 Release。
-  - **① 听书「按章节定时」（10083）**：档位只有 **本章 / 3 章 / 5 章**（作者指示，**不要**加 10 章档）。语义 = 引擎**自然读完 N 章后停止，且停在读完那一章的末尾、不进入下一章**。
-    - ⚠️ **只消耗引擎自然推进**：`nextChapter(syncView)` 的拦截条件是 **`!syncView && timeChapter > 0`**；用户显式跳章（`syncView = true`）**既不消耗也不清零**。改成无条件递减会让手动翻页吃掉额度。
-    - ⚠️ **归零时必须 `return`**，且 `advanceToNextChapter` 必须在 `ReadAloud.stop(this)` **之后**（否则先进下一章再停）。
-    - ⚠️ **两种定时双向互斥**：`setTimer`/`addTimer` → `clearChapterTimer()`；`setChapterTimer` → `timeMinute = 0`。
-    - ⚠️ **会话内状态、不持久化**（无 `PreferKey`/`AppConfig` 键，勿加）；**`onCreate` 与 `onDestroy` 都必须清零**。
-    - ⚠️ **档位表 `BaseReadAloudService.chapterTimerOptions` 是唯一来源**，三个入口（面板快捷键 / 面板 `tvTimer` 选择器 / 听书页 `SliderPopup`）都必须消费它，**禁止各自内联 `intArrayOf(1,3,5)`**。
-    - 面板 `seekTimer.onProgressChanged` **必须**在 `chapterTimerRemainingText() != null` 时提前 `return`，否则章节文案被「0 分钟」覆盖。
-  - **② 音量增强：滑条 → 开关（10083）**：开 = 固定 **2 倍**（`VolumeGain.MAX_FACTOR = 2f`、`MAX_PERCENT = 100`），关 = 不增强。**上限刻意只到 2 倍**（2 倍以上必然削波破音，作者指示），**不要调回 5 倍**。`coerceIn` 顺带迁移历史 300/400 脏值。
-    - 删除 `QualityCost` / `qualityCostFor` / `DISTORTION_FACTOR`、滑条与加减按钮、`GAIN_STEP` 及逐档文案。
-  - **③ 朗读面板重排（10083/10085）**：`语速 <值> [跟随系统] …… [音量增强] ⓘ` **必须同一行**（`ll_tts_SpeechRate`）；标签用短文案；倍数与音质代价放 ⓘ 弹窗，**不要**再加常显提示控件（既挤行宽又是历史崩溃点）。
-  - **④ `onDestroy` 清章节定时（10086）**：`onDestroy` 原先只重置 `isRun`/`pause`/`loading`，**没清 `timeChapter`**。分钟定时看不出（面板回退显示持久化的 `AppConfig.ttsTimer`），章节定时**无持久化默认值** ⇒ 残留值成了唯一显示来源，表现为「停止朗读后面板/通知栏仍显示『还剩 N 章』」。
-    - ⚠️ **这是开发期（10083~10085 中间构建）自查出的缺陷，从未出现在任何发布版中**，故**不写进发布说明**；但代码修复与回归锁必须保留（章节定时一旦进入正式版，这就是真实回归点）。修法：`onDestroy` 调 `clearChapterTimer()`。
-  - **回归锁**：`ReadAloudChapterTimerGuardTest`（**10 项**）、`ReadAloudVolumeGainHintTest`（`volumeGainIsASwitchEndToEnd` + `speedAndVolumeGainShareOneRow`）、`VolumeGainTest.ceilingIsExactlyTwoTimes`。⚠️ `app/build.gradle` 已声明 `dialog_read_aloud.xml` + 两个 `strings.xml` 为 Test 输入（否则只改资源会命中 build cache 假绿）。
-    - ⚠️ **本次两次踩到「无效断言」，都靠注入证伪才发现**：① **`indexOf` 序关系**——`clearAt < fillAt` 在删掉那行后 `indexOf` 返回 `-1` 而仍成立 ⇒ 必须写成 `clearAt >= 0 && fillAt >= 0 && clearAt < fillAt`；② **子串切片不认嵌套**——「起始标记 → 下一个任意标记」截取会把挪进后一个 LinearLayout 的控件也算作"同一行"⇒ 必须按该行自身闭合标签（8 空格缩进）截取。
-    - ⚠️ 另有**注入未命中**坑：PowerShell 单引号字符串里的 `` `n `` 是**字面量**不会换行，替换静默 no-op 却报"注入后仍全绿"，被误判成断言无效 ⇒ **注入后必须回显是否命中**。注入还**必须可编译**。
-  - **验证**：全量单测 **261 项 / 10 失败**（＝既有已知 10 项，**无新增**）。
-  - **实机回归**：手机 `72a2b362`（Redmi，10081→10086 覆盖升级，作者实测确认功能正常）；平板 `HA1KAPWG`（覆盖升级，0 崩溃）；模拟器完成 UI 结构回归（面板一行内 4 控件、ⓘ 弹窗文案、快捷键点击后 `tv_timer` 显示「还剩 1 章」、通知栏标题同步）。⚠️ **模拟器无系统 TTS 引擎**，"读完本章自动停"的端到端由作者真机确认。
-  - **产物**：正式版 36,169,704 字节（sha256 `44FC1AE0…`）＋ 共存版 36,169,219 字节（sha256 `F9EA6652…`）；均 `10086` / `3.26.101215c` / 阅读SK / arm64-v8a / 8 dex / 无 `debuggable` / apksigner exit 0。
-  - **下一次交付 versionCode 从 `10087` 递增。**
-
-- ✅ **10081（`3.26.100515c`）——历史交付，✅ 已发布 Pre-release `v3.26.100515-10081`（2026-10-05）**（修复换源对话框「书源标记显示不正确」）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。
-  - **作者报的现场**：换源对话框里✓停在**曾经用过、但已不是当前源**的那一行；点它被判为「当前源」而拒绝换源，而实际在用的源反而没有标记。普通源与聚合源都会出现。
-  - **根因（两级）**：
-    1. **判据用 `bookUrl`，但归并后它不再等于当前源**。10054 起换源走 `BookUpsert` 身份归并，`BookUpsert.kt:99-103` 把合并结果的 `bookUrl` **强制回写成旧记录的**（主键兼缓存目录地址，不能变），只把 `origin` 换成新源；而列表每行的 `bookUrl` 由**新源**解析（`BookList.kt:281`）⇒ 两者永不相等。**这是 SK 归并机制与上游 UI 假设的契约冲突**：参照版本 legado-E / Legado_Max 的 `changeTo` 是 `delete()`+`insert()`，`bookUrl` 恒等于当前源，故它们没有此现象，两版 adapter 与 SK **逐字一致**。
-    2. **只改用 `origin` 也不对**：`origin` 只到**书源**粒度，聚合源一次搜索返回多条、各行 `origin` 相同 ⇒ **同源所有行全部打勾**（实测 9 行全勾）。⚠️ 此坑 10081 开发中**真实踩过并被实机截图抓到**，不要以为「换 origin 就完了」。
-  - **修法：`origin` 圈定书源 + `tocUrl` 圈定该源里的具体哪一行**，收敛到两个 Dialog 的 `isCurrentSource(searchBook)` **单一入口**（勾、点击拦截、底栏跳当前源、删当前源触发自动换源 四处共用）。
-    - `tocUrl` 之所以成立：由该行自己的详情页解析（`BookInfo.kt:151`）**行级唯一**，且 `BookMergeRules.mergeInto:161` 保留选中行的值 ⇒ 归并后仍能指回那一行。
-    - ⚠️ **残留边界（已登记，勿当新 bug 上报）**：`book.tocUrl` 为空时 10081 的写法是 `return true`（同源即算当前源）。若某天出现「某书源整列都点不动」，就是这里 —— 因为 `isCurrentSource` 的返回值**同时决定「点了要不要换源」**。作者已知悉并选择保持现状。
-  - **顺带修掉**：① 点当前源行原本**全程静默**（无 else 分支），现改为提示「当前已在使用该书源」；② 底栏「跳当前源」原本因同一 bookUrl 冲突**静默无效**；③ **删掉当前正在用的源不触发自动换源**（判据恒 false）。
-  - **回归锁** `ChangeSourceCurrentRowGuardTest`（6 项，`app/build.gradle` 声明了 `values/strings.xml`+`values-zh/strings.xml` 为 Test 输入，否则只改资源会命中 build cache 假绿）。
-    - ⚠️ **两条断言首版是无效断言，靠注入证伪才发现**：`guardAt < feedbackAt` 的**序关系**（把反馈移到 if/else 之外仍满足）→ 改为取 else 块本身；全文件 `contains(callBack.openToc(it))`（把调用包进守卫后子串仍在）→ 改为取点击块并断言块内无守卫。
-    - 证伪 **v5 6 项 + v6 5 项全 RED**。⚠️ **两条方法论教训**（本版踩过）：① **基线必须是「已提交的修复」**，否则 `git checkout` 会把修复本身还原，注入全部假红；② **注入必须可编译**，否则 RED 来自编译错而非断言 —— 判据是把「失败断言名」打出来，为空即无效证伪。
-  - **验证**：全量单测 **250 项 / 10 失败**（＝既有已知 10 项 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增**）。
-  - **实机回归（平板 `HA1KAPWG`）**：换源对话框正常列出、无重复标记、每行可点可换源；实际换源后**章节与位置不变**（第65章 8/15）；反复开关 5 轮 **pid 不变、0 崩溃 0 ANR**；崩溃缓冲全程 0 条。
-  - **产物**：正式版 36,169,149 字节（sha256 `3FD5C33E…`）＋ 共存版 36,168,800 字节（sha256 `BE4404FE…`）；均 `10081` / `3.26.100515c` / 阅读SK / arm64-v8a / 8 dex / apksigner exit 0。
-    - ⚠️ GitHub 资产名用 ASCII 后缀 **`_sk2-coexist`**（非 ASCII 会被静默截断），发布说明里写明它就是共存版。
-  - **下一次交付 versionCode 从 `10082` 递增。**
-
-- ✅ **10076（`3.26.093012c`）——历史交付，✅ 已发布 Pre-release `v3.26.093012-10076`（2026-09-30）**（修复「加入书籍」不触发自动备份 + 补齐 3 个漏点 + 2 项加固 + 补跳过日志）：
-  - 分支 **main**（提交 `33ab2fb2` 主修 / `3e17ab5f` 加固）。**无 DB 迁移**（版本仍 117）。
-  - **根因**：**`Book.save()` 不是加架的唯一收口**。全项目有**两个**写库收口，10075 只接了其一：
-    | 收口 | 本质 | 10075 是否接 |
-    |---|---|---|
-    | `Book.save()`（`data/entities/Book.kt`） | 按 `bookUrl` 覆盖写 | ✅ 接（只覆盖少部分路径） |
-    | **`BookUpsert.savePlain()` + `merge()`** | **按身份收敛写入**（10054 引入） | ❌ **没接** |
-  - ⚠️ `BookUpsert` **直调 `bookDao.insert/update/delete`，从不调 `Book.save()`**（新书入库在 `savePlain` 的 insert），而**主流「加入书架」全走它**：搜索页 `HomepageViewModel.onAddToShelf`、详情页 `BookInfoViewModel.addToBookshelf`。
-    - **实机现象**：删书能备份、加书不能。**删除侧正常纯属巧合**（删除收口恰好是被接上的那两个方法）。
-    - 时序自洽：`BookUpsert` 于 `9655ee5e`(10054) 引入，**早于**触发点接线 `2cb89035`(10075)。
-    - ⚠️ **作者原猜测「因为加书不在书架页面所以没判断到」不成立**——触发点从未接在 UI 入口上。
-  - **修复**：`savePlain()` 与 `merge()` 的**事务之后**各接一次触发。
-    - ⚠️ 必须接在 `savePlain` **函数末尾**而非 insert 分支：该函数有 insert / update / 删 stray 三个出口，**stray 删除在分支之外**。
-    - ⚠️ 两处都必须在**事务之后**：事务内失败会回滚，提前触发会备份出一个并未发生的新书架。
-  - **补齐 3 个独立漏点**（审核穷举全库 `bookDao` 写点后查出）：`VideoPlayerViewModel.removeFromBookshelf`（视频页「移出书架」→ 改走 `Book.delete()`）、`CacheManageViewModel.restoreCacheToBookshelf`（缓存恢复到书架）、`ImportOldData.importOldBookshelf`（导入旧版数据）。
-    - 经核实**按设计不该触发、故未接**：本地 TXT/EPUB 导入（`BookType.local`）、`deleteNotShelfBook`（`notShelf`）、`AiBookshelfTool`（**本版无加书入口**）。三者都被 `ShelfIdentity` 排除。
-  - **加固一（结构性隔离）**：`Restore.overwriteShelfIfNeeded` 原本调**会触发**的 `book.delete()`，只靠 `Restore.isRestoring` 一个**运行时布尔**挡住 ⇒ 隔离其实是隐式约定，一旦有人改动其作用域，恢复就会在解压中途触发备份，**把正在读取的备份目录删掉**。新增 `Book.deleteWithoutShelfBackup()`，恢复侧显式调用；`isRestoring` 保留作第二道防线。
-    - ⚠️ **10075 的注释是错的**：`Book.kt` 与守卫测试都声称「恢复流程不经过 save/delete」，**只提了 `save()`、漏了 `delete()`**，与 `Restore.kt:466` 直接矛盾。已修正。
-  - **加固二**：拿锁后复查 `lastShelfKeys`。`pendingShelfChangeJob` 是普通 var（无 volatile/无锁），并发时两个 job 都可能进 `withLock` ⇒ 先到的记完账，后到的**重复备份一次**。
-  - **回归锁 9→12 项**：`AutoBackupOnShelfChangeGuardTest`。
-    - ⚠️ **旧断言对本缺陷完全不可见**（测试盲区）：它只检查 `Book.kt` 里**有没有**那行字符串，**压根不看 `BookUpsert.kt`** ⇒ 加书全漏触发而测试全绿。现断言落在各**函数体**上（`shelfWriteFunnelsAllTriggerBackup`），并把 `triggerIsOnDomainMethodsNotDao` 从「整个文件含字符串」收紧到「`delete()` 函数体含字符串」（否则 save 有、delete 没有也算绿）。
-    - **四项双向证伪**（各自注入 → 对应测试失败 → 全部还原）：摘 savePlain 触发 / 摘 merge 触发 / 恢复侧改回会触发的删除 / 摘拿锁复查。
-    - ⚠️ 其中「拿锁复查」的断言**首版是无效断言**（写「块内出现过 `lastShelfKeys`」，**记账行也命中**，实测摘掉复查块后**仍全绿**）。已改为锚定复查语句本身（比较 freshly-read 的 `verified`，且 `return` 早于 `backup`）。**这类"断言了但没真断言"必须靠注入证伪才能发现。**
-  - **验证**：全量单测 **242 项 / 10 失败**（10 项＝既有已知失败 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增失败**；新增 4 项全绿）。
-  - **三份独立只读审核交叉验证**（AGENTS §1.5 实践；报告在 gitignored `test-records/autobackup-add-not-triggering/`）：证伪代理确认根因成立并**纠正主代理 3 处过度断言**；穷举代理列出完整漏触发清单；方案代理**否决了另 3 个方案**（含「App 层观察 `bookDao`」——会让**每次翻页存进度**都跑全表查询 + 集合比对，是真正的高频风险）。
-  - **补可观测性缺口**（`88ab2bba`）：`autoBackupOnShelfChangeIfNeeded` 的「身份键集合未变化 ⇒ return」原本**完全静默**，导致实机上「加了书却没备份」**无法从日志区分**三种情形（① 触发点没接上＝缺陷；② 集合确实没变＝设计幂等；③ 正在去抖/上传）。排查时只能靠读源码推断。现补日志，**四个「决定不备份」出口全部可查**：开关关闭 / 恢复中 / 未配任何目标 / 集合未变。
-    - 回归锁 `everySkipBranchLogsItsReason`（12→**13** 项），已双向证伪（摘掉该日志 → FAILED）。
-    - 实机诊断命令：`adb -s <serial> logcat -d | findstr "书架变动自动备份"`。
-  - **实机验证（两台，`io.legado.app.sk2` 10075 → 10076 覆盖安装保数据）**：
-    - 平板 `HA1KAPWG`：`firstInstallTime` 保持 `2026-09-21 13:08:56`、`ceDataInode` 保持 `3702639`；pid 存活、`logcat -b crash` 0 条。**作者实测「搜索页加书架」已正常备份**（10075 时不备份）。
-    - 手机 `72a2b362`：`firstInstallTime` 保持 `2026-09-21 16:12:52`、`ceDataInode` 保持 `820249`；`logcat -b crash` 0 条。
-    - ⚠️ **手机首装被 `INSTALL_FAILED_USER_RESTRICTED` 拒绝**（HyperOS「USB 安装」开关），请作者手动开启后成功。**再次印证：adb 侧绕不过去，直接请作者开开关，不要反复重试。**
-  - **⚠️ 排查教训（第二轮实机反馈）**：作者报「搜索页加书架仍不备份」，但那条路径（搜索网格 → 详情页 → 加书架 → `BookUpsert`）**代码上已被本版覆盖**；真因是**手机当时仍是 10075**。
-    - **教训：实机反馈先核实「被测设备装的哪个 versionCode」，再读代码。** 本次差点为一条其实已修好的路径去改代码。
-    - 另一条要记住的正常行为：若该书在进详情页时**已落库**（点「开始阅读」/「目录」会先落库），再点「加入书架」时书架集合**没变** ⇒ 按幂等设计**不该备份**（现已有日志可区分，见上）。
-  - **产物**（重编后）：正式版 36,178,830 字节（sha256 `7a30b44d…`）＋ 共存版 36,178,814 字节（sha256 `6994d46c…`）；均 `10076` / `3.26.093012c` / 阅读SK / arm64-v8a / locales `'zh'` / 8 dex / 无 `debuggable` / apksigner exit 0（`79fef578…`）。
-  - **下一次交付 versionCode 从 `10077` 递增。**
+<!-- §6 仅保留最近 3 条交付；10089 / 10086 / 10081 / 10076 及更早的逐版净增量见 companion/发布版更新记录.md §1。 -->
 
 ## 7. 当前机器环境与配套文档（2026-09-04 迁移后）
 
