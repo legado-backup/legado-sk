@@ -369,29 +369,29 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10096` 递增**（10095 为当前交付，本条随发布更新）。
+> **下一次交付 versionCode 从 `10097` 递增**（10096 为当前交付，本条随发布更新）。
 
 ---
 
-- ✅ **10095（`3.26.101518c`）——main 当前交付，⚠️ 尚未发布 Release**（修复朗读底部面板偶发贴屏底）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。两个提交：`a78b1719`（重放 10024 面板定位修复 + 回归锁）、`e4d6b57d`（测试输入声明，堵假绿）。
-  - **① 重放 10024「朗读面板定位就绪才显示」（`a78b1719`）**：作者报「听书底部悬浮窗（暂停/继续）有时贴着屏幕底部，呼出菜单再退回又恢复正常」。
-    - **定性结论（作者问「是我版本的问题还是上游就有的」）：两边都沾，但根子在 SK 侧**——
-      - **上游（阅读C）本身就有此缺陷**：`showReadAloudPlaybackPanel` 是「先 `visible()`，再在 `doOnLayout` 里算 margin」的原生写法（`upstream/own` 与 10094 逐字相同，**上游至今未修**）。
-      - **但 SK 10024（`bc78a134`）已修过**，`10025/10026/10027/10029/10030/10033/10035` 都带着修复；**10036（2026-09-08）「重植上游基线 + 逐项重放 SK 定制」时这条定制没被重放**，缺陷回归并持续到 10094。判据：`git merge-base --is-ancestor bc78a134 HEAD` → 否；该 helper 在 HEAD 全库 0 命中。
-    - **机制**：面板布局是 `layout_marginBottom=0dp` + `layout_gravity=bottom`（`activity_book_read.xml`），校正值只能异步算（依赖 readView 高度与页脚位置）→ ① `visible()` 到回调之间面板已按贴底位置布局过一次；② 回调开头的**三重 mode 校验任一失败就 `return`**，此后再无人补，面板**永久**贴底。菜单切换会重跑 `showReadAloudPanel` **给第二次机会**，故作者观察为「偶发、菜单一进一出就好」。
-    - **修法（按 10024 原文重放）**：`ReadBookActivity` 新增 `tryReadAloudPanelBottomMargin`（未就绪返回 `null` 而非抛异常）与 `positionAndRevealReadAloudPanel`（先定位后显示；未就绪则挂 `OnGlobalLayoutListener` 重试并保持隐藏）；两个面板统一走该入口；删除旧同步校正 `readAloudPanelBottomMargin`。`ReadView`/`PageView` 新增 `footerMeasurable`。
-    - ⚠️ **重放 SK 定制时最容易漏的就是这种「上游原生写法 + SK 后修补丁」**：重植基线会把它一起退回上游形态，而它不在任何上游提交里，`git log -S <新符号名>` 在 main 上也查不到（10024 的提交不在 HEAD 祖先链）。**核对方法**：对每个 SK 定制按「符号名」在 HEAD 全库 grep，命中 0 就是丢了。
-  - **② 回归锁 `ReadAloudPanelPositionGuardTest`（`a78b1719`，3 项）**：
-    - `footerMeasurableIsExposedThroughBothLayers`、`panelsArePositionedBeforeRevealed`、`legacySynchronousMarginHelperIsGone`。
-    - **4 轮注入证伪全部 RED，且每轮命中对应断言**：删 `panel.gone()` 行 / 回退成先 `visible()` / 回退 `doOnLayout` / `PageView.footerMeasurable` 判据改恒 `true`。
-    - ⚠️ **本版两个假绿陷阱（都实测踩到，务必复用）**：
-      1. **`.kt` 不是 Test 任务的默认输入** → 只改被断言的源码、不动测试类时会命中 build cache **复用旧结果**（真删了被断言的代码行，测试仍报全绿）。已把三个源文件加进 `app/build.gradle` 的 `tasks.withType(Test)` `inputs.files`（`e4d6b57d`）。⚠️ 与 §4 里为 `res/` 资源做过的同类声明是**同一个问题**，对象换成了 `.kt`。
-      2. **断言必须去注释后再比对** → `// panel.gone()` 一样能喂饱 `contains("panel.gone()")`。本测试加了 `stripComments()`（逐字符扫描，跳过字符串/三引号原始串，注释替换为等量空白以保持行号）。
-  - **验证**：全量单测 **281 项 / 10 失败**（＝既有已知 10 项 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增**；278+3 新）。
-  - **模拟器回归（`emulator-5554`）**：正式版 `io.legado.app.c` 10087→10095 覆盖升级（`firstInstallTime` 不变）、共存版 10094→10095 覆盖升级（不变）；启动朗读后 `read_aloud_playback_panel` 落在 `y=1787`（面板底 1859，**非屏底 1920**），截图确认面板位于页脚「第1章(1) / 4/24」**上方**。
-  - **产物**：正式版 36,171,598 字节 ＋ 共存版 36,171,327 字节；均 `10095` / `3.26.101518c` / 阅读SK / arm64-v8a / 8 dex / apksigner exit 0。已收进 `release/`（3 文件约定形态，已删 10094 两件套）。
-  - **下一次交付 versionCode 从 `10096` 递增。**
+- ✅ **10096（`3.26.101625c`）——main 当前交付，✅ 已发布 Pre-release（2026-10-16）**（修复双击跳段/从本页听多跳段落 + 听书底部面板贴屏底）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。一个提交：`f47fe395`（重放上游 `68c06ed3` 串行准备 + 主线程确认令牌）。
+  - **① 双击跳段/从本页听「多跳段落」修复（`f47fe395`）**：作者报「双击跳段或从本页听有时多跳段落，目标段落离当前朗读段落越远跳得越多；只差一两段一般不犯」。
+    - **根因**：`newReadAloud` 以 `execute(executeContext = IO)` 跑在 **IO 线程池**，而 `prepareReadAloudChapter` 写一组**共享播放游标字段**（`contentList`/`nowSpeak`/`readAloudNumber`/`pageIndex`/`chapter`/`paragraphStartPos`）。旧请求的 prepare 与新请求的 prepare 在线程池上**交错写同一组字段**——`readAloudStartRequest`/`preparedReadAloudStartRequest` 只保护「**发布**」窗口，**不串行化「写入」**——`play()` 随后消费到**混合游标**，起点落到比目标更后的段落。两游标差值随「目标↔当前」距离增大，故作者观察到「差得越多跳得越多」。
+    - **上游已修**：`68c06ed3`「串行准备朗读并在主线程确认令牌发布状态」（2026-10-07）——`readAloudPrepareMutex.withLock` 串行化整段准备，并把「令牌复检 + 写回 + `play()`」收进 `withContext(Main)` 原子临界区。判据：`git merge-base --is-ancestor 68c06ed3 HEAD` → 否；`readAloudPrepareMutex` 在 HEAD 全库 **0 命中**。**10036 换基底时漏重放**（与 10095 的面板贴底同属「上游原生写法 + SK 后修补丁」丢失）。
+    - **修法**：`newReadAloud` 去掉 `executeContext = IO`、整段准备入 mutex、尾部收敛为单一 `withContext(Main)` 确认块，删除两处只做 check-then-act 的 SK 复检（上游主线程块内复检严格更强）；`cancelReadAloudStart` 改 `suspend` + `withContext(Main)`；`prepareReadAloudChapter` 不再自行 `publishParagraphProgress()`，进度发布随确认块同进临界区。重放后与上游该函数**逐行一致**（忽略注释，脚本比对过）。
+    - ⚠️ **保留 SK 的非崩溃策略**（`stopReadAloudOnInvalidPosition` 而非上游 `error()`）；**不采纳** `68c06ed3` 对 `SourceAudioReadAloudService.setPlaybackSpeed` 的回退——那是把 SK 的崩溃加固退回去。
+    - ⚠️ **诚实的未证实项**：「为什么最近才变频繁」**未定位到具体 10094 提交**——该竞态自 10036 就存在，10094 反而减少了会话重启（`d3a79ac7`）。不排除只是那几天听得多、暴露率上来。已按「已确认 / 仍是假设」标注，没有硬凑替罪羊。
+    - **回归锁 `ReadAloudStartRequestSerializationGuardTest`（4 项，源码级静态断言）**：`chapterPreparationIsSerializedByMutex`、`tokenConfirmationAndPlayShareOneMainThreadCriticalSection`、`startPathNoLongerRunsPrepareOnIoThreadPool`、`cancelAlsoConfirmsOnMainThread`。**4 轮编译有效注入全部 RED 且各命中对应断言**（mutex 改名 / `play` 退回 `launch(Main)` / 准备退回 IO / 取消改回 IO）。
+    - ⚠️ **新增假绿陷阱（实测踩到）：注入必须「编译有效」，且跑前要清掉旧结果目录**——删 mutex 字段那版**编译不过**，Test 任务根本没跑，脚本读到**上一次的旧 XML** 报了假 GREEN。判据：先看 `compileAppReleaseKotlin` 是否 error，再断言 RED；或注入后 `rm -rf` test-results 目录。
+    - ⚠️ **纠正子代理误判**：设备日志里「从本页读 + 双击换段」同毫秒成对出现**不是双触发**——`setAloudStart` 对两个入口都打「双击换段」这条日志，实际是**单次调用**（`从本页读` 那条来自 `restartFromPage`，`双击换段` 那条来自 `setAloudStart`，同一次手势各打一条）。
+  - **② 听书底部面板偶发贴屏底（10095 的修复，随本版一并交付）**：`10095` 未单独发布 Release，其修复已并入本版（10095/10096 同源，见下条）。
+  - **验证**：全量单测 **285 项 / 10 失败**（＝既有已知 10 项 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增**；281 + 4 新）。
+  - **模拟器回归（`emulator-5554`）**：正式版 `io.legado.app.c` 与共存版 `io.legado.app.sk2` 均 10095→10096 覆盖升级（`firstInstallTime` 均不变）；实机双击跳段 `pos:3100` → `位置发布 pos:3100 gen:8 confirmed:true prev:ch21:3188`，**精确落点、零偏移**，随后正常逐段推进。
+  - **产物**：正式版 36,172,287 字节 ＋ 共存版 36,171,859 字节；均 `10096` / `3.26.101625c` / 阅读SK / arm64-v8a / 8 dex / apksigner exit 0。已收进 `release/`（3 文件约定形态）。
+  - **已发布**：tag `v3.26.101625-10096`（Pre-release）；资产 `…_10096_arm64-v8a.apk` ＋ `…_10096_arm64-v8a_sk2-coexist.apk`（共存版资产名用 ASCII 后缀，上传时用 `gh release upload … "本地（共存版）.apk#目标名.apk"` 直接指定，避免中文名被静默截断）。
+  - **下一次交付 versionCode 从 `10097` 递增。**
+
+- 📎 **10095（`3.26.101518c`）——未单独发布 Release，其修复已并入 10096**（听书底部面板偶发贴屏底）：详见 `companion/发布版更新记录.md` §1 的 10096 节第三节与 10095 节。逐版细节不再在此累积。
 
 - ✅ **10094（`3.26.101530c`）——历史交付，✅ 已发布 Pre-release（2026-10-15）**（朗读 bug 修复 + 朗读界面更新）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。六个提交：`58bb4e4f`（恢复播放端倍速兜底）、`7dfd9107`（HTTP 句内锚点）、`51d6329b`（TTS 句内锚点）、`e2c4758f`（句尾收尾守卫）、`c0dbc9f9`（跨章恢复回调）、`d3a79ac7`（调语速不重启会话）。

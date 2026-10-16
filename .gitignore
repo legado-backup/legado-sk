@@ -35,5 +35,7 @@ tools/android-dev/bin/
 test-records/
 .dsh-vision-toolkit/
 .dsh/
+# 外部 agent 工具在本机留下的工作目录（非本项目产物，不推送）
+.workbuddy/
 build_logs/
 build-logs/
