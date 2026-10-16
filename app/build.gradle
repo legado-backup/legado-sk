@@ -256,6 +256,8 @@ android {
         inputs.file("src/main/java/io/legado/app/service/BaseReadAloudService.kt")
                 .withPropertyName("readAloudStartSerializationGuardSource")
                 .withPathSensitivity(PathSensitivity.RELATIVE)
+        // 注：UpdateManagerAssetSelectionTest 调用的是**编好的** UpdateManager（非读源码文本），
+        // class 字节本就是 Test 任务的输入，故无需在此声明。
     }
     lint { //忽略string翻译缺失，后面需要翻译时去掉，todo
         checkDependencies = false

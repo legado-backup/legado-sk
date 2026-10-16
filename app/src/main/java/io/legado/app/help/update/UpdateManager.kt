@@ -2,6 +2,7 @@ package io.legado.app.help.update
 
 import android.content.Context
 import androidx.annotation.Keep
+import io.legado.app.BuildConfig
 import io.legado.app.R
 import io.legado.app.constant.AppConst
 import io.legado.app.constant.PreferKey
@@ -25,6 +26,9 @@ object UpdateManager {
 
     private const val GITHUB_API = "https://api.github.com/repos/skxingyu/legado-sk/releases?per_page=30"
     private const val MAX_BODY_LEN = 2000
+
+    /** 共存版 APK 资产名标记（ASCII，见 AGENTS.md §3 的资产命名约定：`…_sk2-coexist.apk`，早期为 `…_sk2.apk`）。 */
+    private const val COEXIST_ASSET_MARKER = "_sk2"
 
     @Keep
     data class GitHubRelease(
@@ -99,7 +103,7 @@ object UpdateManager {
         // 不能从 tag 解析：tag 是版本名格式（v3.26.081303c），里面的数字是 MMddHH，
         // 提取出来会是 81303 这种假版本号，永远大于真实 versionCode，导致误报"发现新版本"。
         val candidates = eligible.mapNotNull { release ->
-            val asset = release.assets.firstOrNull { it.name?.endsWith(".apk", true) == true }
+            val asset = selectUpdateAsset(release.assets, isCoexistBuild())
                 ?: return@mapNotNull null
             val code = parseVersionCodeFromAssetName(asset.name) ?: return@mapNotNull null
             // versionName 中的编译时刻(MMddHH): 同 versionCode 时用于区分新旧,
@@ -136,11 +140,36 @@ object UpdateManager {
     }
 
     /**
+     * 从一次 Release 的资产里挑出**与当前安装变体匹配**的 APK。
+     *
+     * 发布约定（AGENTS.md §3）：正式版 `…_<code>_arm64-v8a.apk`；
+     * 共存版 `…_<code>_arm64-v8a_sk2-coexist.apk`（GitHub 资产名只能 ASCII，
+     * 本地文件名里的「（共存版）」上传时会被静默截断，故以 `sk2` 作为资产标记）。
+     * ⚠️ 不能取 `assets.firstOrNull { 以 .apk 结尾 }`：资产顺序由上传顺序决定，
+     * 共存版会下载到**正式包**，装上去只会新增/更新正式版那个 App，
+     * 共存版自己永远更新不到 —— 这就是「共存版更新检不出自己」的根因。
+     *
+     * 匹配不到（该 Release 没发对应变体）时返回 null，由调用方跳过该 Release：
+     * 宁可提示「已是最新」，也不能给共存版塞一个包名不同的包。
+     */
+    internal fun selectUpdateAsset(assets: List<GitHubAsset>, isCoexistBuild: Boolean): GitHubAsset? {
+        return assets.firstOrNull { asset ->
+            val name = asset.name ?: return@firstOrNull false
+            name.endsWith(".apk", true) &&
+                name.contains(COEXIST_ASSET_MARKER, ignoreCase = true) == isCoexistBuild
+        }
+    }
+
+    /** 当前进程跑的是共存版（包名 io.legado.app.sk2，buildType `sk2`）。 */
+    internal fun isCoexistBuild(): Boolean =
+        BuildConfig.APPLICATION_ID.endsWith(".sk2")
+
+    /**
      * 从 APK 资产文件名解析 versionCode：
      * legado_sk_3.26.081303_10539.apk -> 10539
      * legado_sk_3.26.082015c_10014_arm64-v8a.apk -> 10014（兼容末尾 ABI 后缀）
      */
-    private fun parseVersionCodeFromAssetName(name: String?): Long? {
+    internal fun parseVersionCodeFromAssetName(name: String?): Long? {
         name ?: return null
         return Regex("_(\\d+)(?:_[\\w-]+)?\\.apk$", RegexOption.IGNORE_CASE)
             .find(name)?.groupValues?.get(1)?.toLongOrNull()
@@ -152,7 +181,7 @@ object UpdateManager {
      * legado_sk_3.26.081303_10539.apk -> 81303
      * 解析失败返回 Long.MIN_VALUE, 该候选仅失去同号次级比较能力, 主判定(versionCode)不受影响
      */
-    private fun parseVersionKeyFromAssetName(name: String?): Long {
+    internal fun parseVersionKeyFromAssetName(name: String?): Long {
         val versionName = name?.let {
             Regex("_([0-9]+(?:\\.[0-9]+)+)[cC]?_\\d+").find(it)?.groupValues?.get(1)
         }
