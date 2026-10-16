@@ -34,10 +34,12 @@ import io.legado.app.help.coroutine.Coroutine
 import io.legado.app.help.storage.Backup
 import io.legado.app.help.storage.BackupConfig
 import io.legado.app.help.storage.BackupItems
+import io.legado.app.help.storage.BackupScopeDecision
 import io.legado.app.help.storage.BackupTargetConfig
 import io.legado.app.help.storage.BackupThemePackageDedupe
 import io.legado.app.help.storage.ImportOldData
 import io.legado.app.help.storage.Restore
+import io.legado.app.help.storage.decideBackupScope
 import io.legado.app.lib.dialogs.alert
 import io.legado.app.lib.dialogs.progressDialog
 import io.legado.app.lib.dialogs.selector
@@ -343,7 +345,11 @@ class BackupConfigFragment : PreferenceFragment(),
         var lastProgress = -1
         var lastMegabyte = -1L
         backupJob = lifecycleScope.launch {
-            val backupTargets = selectBackupTargets() ?: return@launch
+            // null 是「全选」的合法值（见 BackupScopeDecision），只有 Abort 才中止。
+            val backupTargets = when (val decision = selectBackupTargets()) {
+                BackupScopeDecision.Abort -> return@launch
+                is BackupScopeDecision.Proceed -> decision.targets
+            }
             val progressDialog = progressDialog(
                 title = getString(R.string.backup),
                 message = "备份中..."
@@ -535,16 +541,21 @@ class BackupConfigFragment : PreferenceFragment(),
         }
     }
 
-    private suspend fun selectBackupTargets(): Set<String>? {
+    private suspend fun selectBackupTargets(): BackupScopeDecision {
         // 全选 → null（旧「全部打包」语义，新增目标自动包含）；
         // 一个都没勾 → 拒绝并提示，绝不塌缩成"全打包"或"空包"。
-        // 与自动备份共用 BackupTargetConfig.selectedTargetsOrNull()，避免两处各自内联而漂移。
-        val targets = BackupTargetConfig.selectedTargetsOrNull() ?: return null
-        if (targets.isEmpty()) {
-            appCtx.toastOnUi(R.string.backup_select_none)
-            return null
+        // 与自动备份共用同一判据（见 BackupScopeDecision），避免两处各自内联而漂移。
+        //
+        // ⚠️ 这里**绝不能**再写成 `?: return null` 那种"null 就是中止"的收口：
+        // 全选本身的值就是 null，混为一谈会让**默认状态（全选）的备份按钮毫无反应**。
+        return when (val decision = decideBackupScope(BackupTargetConfig.selectedTargetsOrNull())) {
+            BackupScopeDecision.Abort -> {
+                appCtx.toastOnUi(R.string.backup_select_none)
+                decision
+            }
+
+            is BackupScopeDecision.Proceed -> decision
         }
-        return targets
     }
 
     /** 备份项目清单与恢复侧共用同一份定义（见 [BackupItems]），避免两侧口径漂移。 */

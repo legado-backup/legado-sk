@@ -338,3 +338,33 @@ object BackupTargetConfig {
         FileUtils.createFileIfNotExist(configPath).writeText(GSON.toJson(selections))
     }
 }
+
+/**
+ * 备份范围决策：把「用户选择」翻译成调用方可以无歧义执行的动作。
+ *
+ * ⚠️ 存在的唯一理由：`selectedTargetsOrNull()` 用 **null 表示「全选」**（不下发清单，
+ * 让日后新增的备份目标自动包含，见其 KDoc），而「中止备份」也需要一个信号 ——
+ * 10073 起调用方曾用 `?: return@launch` 把两者混为一谈，于是**全选（＝默认状态）时
+ * 备份按钮毫无反应**。本类型把两者拆成互斥分支，`Proceed(null)` 只可能是「全打包」。
+ */
+internal sealed interface BackupScopeDecision {
+
+    /** 执行备份。[targets] 为 null 表示全选 / 旧「全部打包」语义。 */
+    data class Proceed(val targets: Set<String>?) : BackupScopeDecision
+
+    /** 一个都没勾：调用方必须拒绝并提示，不得塌缩成「全打包」或「空包」。 */
+    data object Abort : BackupScopeDecision
+}
+
+/**
+ * 见 [BackupScopeDecision]。
+ *
+ * 纯函数、不触碰 `appCtx`（故**不能**写进 [BackupTargetConfig]，那会让 JVM 单测
+ * 在对象初始化时 `ClassNotFoundException: android.app.ActivityThread`），
+ * 因此可被单测直接调用 —— 这是本缺陷唯一的真行为回归锁。
+ */
+internal fun decideBackupScope(selection: Set<String>?): BackupScopeDecision = when {
+    selection == null -> BackupScopeDecision.Proceed(null)
+    selection.isEmpty() -> BackupScopeDecision.Abort
+    else -> BackupScopeDecision.Proceed(selection)
+}

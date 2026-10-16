@@ -57,6 +57,9 @@ class BackupTargetConfigTest {
      *
      * 空集不能被塌缩成「全部打包」或「打个空包」：
      * 前者无视用户设定，后者产出一个「恢复后什么都没有」却提示成功的包。
+     *
+     * ⚠️ 真正的行为锁在 [BackupScopeDecisionTest]（直接调 `decideBackupScope`）；
+     * 这里只做源码级结构断言，防止这一段被改回内联判断而绕过共享入口。
      */
     @Test
     fun emptySelectionIsRefusedNotSilentlyWidened() {
@@ -65,12 +68,16 @@ class BackupTargetConfigTest {
         assertTrue("未定位到 selectBackupTargets 方法体", block.isNotBlank())
         assertTrue(
             "空选择必须拒绝并提示",
-            block.contains("targets.isEmpty()") && block.contains("backup_select_none")
+            block.contains("BackupScopeDecision.Abort") && block.contains("backup_select_none")
         )
+        assertTrue(
+            "决策必须来自共享入口 decideBackupScope()，不得在 UI 层内联 isAllSelected/isEmpty",
+            block.contains("decideBackupScope(")
+        )
+        // 全选（null）是该入口的合法成功值，UI 层不得再自行判空或自行塌缩
         assertFalse(
-            "空选择不得回退成「全部打包」",
-            block.contains("if (targets.isEmpty()) return null\n        }\n        return targets") &&
-                block.contains("hashSetOf()")
+            "UI 层不得自行判断 selectedTargetsOrNull() 是否为 null",
+            block.contains("selectedTargetsOrNull() ?:")
         )
     }
 
@@ -102,7 +109,7 @@ class BackupTargetConfigTest {
         // 空选择必须拒绝，不得塌缩成全打包或空包
         assertTrue(
             "空选择必须提示并中止",
-            manual.contains("backup_select_none") && manual.contains("return null")
+            manual.contains("backup_select_none") && manual.contains("Abort")
         )
     }
 
