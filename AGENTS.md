@@ -293,6 +293,11 @@ Activity 页面标题和正文标题不是“弹窗头”，不得为追求无�
 - **阅读排版预设按数组下标寻址**：`DefaultData.readConfigs` 由 `ReadBookConfig.getConfig(index)` 直接取用，`readStyleSelect` 是 **Int**。**只允许在数组末尾追加**，改名安全但要同步 `BuiltinPresetAssetTest.READ_PRESET_HEAD`；插入/重排会让存量用户当前排版整体位移。唯一比较预设**名字**的地方是 `ReadBookConfig.kt` 的 `isOldFormatConfigList`（旧格式迁移），改名经实跑验证不影响其布尔结果（下标 0 先命中 `||` 短路）。
 - **语言裁剪边界**：`resConfigs "zh"` **会裁掉同语言 region 变体**（`zh-rHK`/`zh-rTW` 与繁体、其他语言一样被裁，只保留精确 `zh`）。产物实测 `locales: '--_--' 'zh'`、`unzip` 中 HK/TW 计数为 0，故 `values-zh-rHK|rTW` 是**不进 APK 的死资源**（已于 10038 删除），不存在"HK/TW 回退到简体或英文"的情形。详见 §6 的语言裁剪边界注。
 - **备份打包清单的两类路径（10044 确立、10045 补强，改动前必读）**：给 `ZipUtils.zipFile` 的路径分两类——「本次流程自己创建/校验的」可直接传，「依赖用户配置才存在的」必须先 `exists()` 过滤。⚠️ 但**过滤时点**同样关键：由本次流程**稍后**才创建的目录（如 `covers`，`prepareCustomCoverBackup()` 才建）**不能放进 `backgroundAssetDirNames` 交给存在性判定**，否则会被提前跳过 → 数据静默漏备份（10045 修）。正确做法：先让创建者建好目录并补齐内容，**再按"目录里实际有什么"判定**（`coverDirShouldBeZipped(File)` 判 `listFiles()` 非空）。⚠️ **判据必须锚定"最终要被打包的那个对象的状态"，不能锚定"本次流程做了什么动作"**——`prepareCustomCoverBackup()` 对**已在该目录内**的封面会跳过拷贝，用"本次拷了几个"判定会把最常见的场景误判为空（10045 首版实现即犯此错，被实机回归抓到）。
+- **备份范围决策：`null` 只表示「全选」，不得再兼作「中止」（10098 确立，改动前必读）**：「默认备份内容」的全选语义由 `BackupTargetConfig.selectedTargetsOrNull()` 承载——**全选返回 `null`**（不下发清单，让日后新增目标自动包含）。10073~10097 的 UI 收口写成 `selectBackupTargets() ?: return@launch`，把「全选」当「用户取消」⇒ **默认状态（未动过该设置＝全选）点「备份」毫无反应**，无进度框/无 toast/无文件。
+  - **唯一判据** `decideBackupScope(selection)` → `Proceed(targets)`（`targets` 可为 null）/ `Abort`，两语义**互斥**。**任何新增备份入口都必须走它**，不得自行判空或内联 `isAllSelected`。
+  - ⚠️ 它**刻意放在 `BackupConfig.kt` 顶层**而非 `BackupTargetConfig` 内：后者初始化读 `appCtx`，JVM 单测求值即 `ClassNotFoundException: android.app.ActivityThread`——放进去就没有能证明**行为**的测试。回归锁 `BackupScopeDecisionTest`（3 项，**直接调真实纯函数**）。
+  - ⚠️ **自动备份侧（`Backup.kt`）把 null 直传 `Backup.backup` 是正确的**（null＝全打包），缺陷只在 UI 收口处，不要"顺手统一"。
+  - ⚠️ 教训：`BackupTargetConfigTest` 那套**源码字面量断言拦不住这一类缺陷**——当时 `return null` 还在、文本全"正确"，坏掉的是**语义**。涉及"同一值两种含义"的改动必须配真行为断言。
 - **⚠️ 已知继承缺陷（2026-09-15 审查登记，作者决定不修，后续审查勿重复上报）**：以下两项是**上游自带**缺陷（上游 `v3.26.091403` 仍未修），**刻意与上游保持一致**以降低同步成本：
   1. **`exportWebDav(uri,…)` 三处调用点未接异常**（`ExportBookService.kt` 的 `exportPdf`/`exportEpub`/`save2Drive` 裸调用）。10043 把该重载改为抛异常契约，同文件 TXT-ZIP 与 `uploadExportToWebDav` 已接住，这三处没有 → 异常冒泡到导出循环 `catch (e: Throwable)` → 本地文件其实已写好却被计入 `failedExports`（**不崩溃**）。⚠️ 修它需给 `exportPdf`/`exportEpub`（返回 `Unit`）改签名并调整调用点消费链，**非"3 行"改动**。
   2. **恢复回滚不含数据库**：`RestoreJournal.buildSnapshotTargets` 不登记 `legado.db`，而 `Restore.kt` 的 `restoreDbData`（SK 10037 引入）事务真实提交 → DB 段之后的步骤失败或进程被杀时，`rollbackNow()` 只还原配置文件、**DB 保持备份内容**（prefs 与 DB 错位）。⚠️ **两条看似显然的修法均已被证伪，勿照做**：① **把 DB 段挪到最后会破坏 `repairLocalCoverPaths`**（其读 `bookDao.all` 回写，必须在 `restoreBackgroundAssets` 之后、且在 DB 恢复后），会让新恢复的书**从未被修复封面路径**且无报错；② **把 DB 纳入快照不可行**：`appDb` 是顶层 `val … by lazy`，全库无 close/reopen 入口。若日后要修，可行方向是把 `RestoreJournal.begin` 下移到 `restoreDbData` **之后**（不动步骤顺序），但须先核查其状态机与 `App.kt` 的 `recoverIfNeeded` 假设。
@@ -373,38 +378,25 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10098` 递增**（10097 为当前交付，本条随发布更新）。
+> **下一次交付 versionCode 从 `10099` 递增**（10098 已构建验证但**未发布**，其 APK 仍在 `release/`，日后要发就发这一个、不要重编；本条随发布更新）。
 
 ---
 
-- ✅ **10097（`3.26.101615c`）——main 当前交付，✅ 已发布 Pre-release（2026-10-16）**（修复共存版检查更新只会下到正式包）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。两个提交：`b1be45b2`（按安装变体选 Release 资产 + 回归锁 + Test 输入声明）、`1ddf0a88`（变体判定提到循环外）。
-  - **① 修复「共存版检查更新只会下到正式版」（`b1be45b2`）**：作者报「共存版好像没有这个（检查更新并下载最新版）功能」。
-    - **结论：确实如此，且比"没有此功能"更糟**——共存版**有**入口、也会弹「发现新版本」，只是**下到的是正式包**（包名 `io.legado.app.c`），装上去表现为"更新了另一个 App"，共存版自身 versionCode 不变。
-    - **根因（依赖资产顺序，确定性缺陷、非竞态）**：`fetchLatestRelease` 对每个 Release 取 `release.assets.firstOrNull { it.name?.endsWith(".apk", true) == true }`。GitHub 的 `assets` **顺序 = 上传顺序**，发布流程固定先传正式版 ⇒ 共存版恒命中正式包。
-      - ⚠️ 这才是旧文「共存版不参与更新检查」的**真实原因**（该结论已在本节 §3 更正）。
-    - **修法**：新增 `selectUpdateAsset(assets, isCoexistBuild)`，按文件名**是否含 `_sk2`** 匹配（**与顺序无关**；现行 `_sk2-coexist`、早期 `_sk2` 都认），匹配不到返 **null**（跳过该 Release）；新增 `isCoexistBuild() = BuildConfig.APPLICATION_ID.endsWith(".sk2")`，在入口算一次。`parseVersionCodeFromAssetName` / `parseVersionKeyFromAssetName` 放开为 `internal` 供测试调用。
-    - ⚠️ **刻意"宁可误报最新"**：没有对应变体资产时返回 null 而不"随便挑一个"——绝不能给共存版塞包名不同的包。副作用是**某版本若只发正式包，共存版会收不到更新**。
-      - ⇒ **发布约定强化：10065 起必须成对上传两个 APK**（旧文只说"必须上传"，本条补上"不成对则共存版静默失去更新能力"）。
-    - ⚠️ **旧版共存版（≤10096）仍会取错包**，代码修复无法回溯修复已装机版本 ⇒ **10097 的共存包必须手动下载安装一次**，之后才能自更新（已写进发布说明）。
-  - **回归锁 `UpdateManagerAssetSelectionTest`（5 项）**：`assetChoiceDoesNotDependOnUploadOrder` / `variantsNeverCrossContaminate` / `missingVariantOrNonApkYieldsNull` / `legacyCoexistAssetNameStillRecognized` / `coexistAssetNameStillParsableForVersion`。
-    - ⚠️ **与仓库多数守卫测试不同：它直接调用真实函数**（`selectUpdateAsset` 是纯函数，不碰 `appCtx`/`BuildConfig`）⇒ 证明的是**行为**，不是"某行代码还在"。故它**不需要**在 `app/build.gradle` 里声明 `inputs.file`（class 字节本就是 Test 输入）；`isCoexistBuild()` 依赖 `BuildConfig`，测试不直接断言它。
-    - **2 轮编译有效注入均 RED**：① 选包退回「第一个 .apk」→ 3/5 RED；② 版本号正则退回上游 `_(\d+)\.apk$` → 1/5 RED。跑前均清空 `test-results`、并确认无 `e:` 编译错误（沿用 10096 的假绿判据）。
-    - **另有线上数据交叉核验**：对 45 个已发布 Release 的真实资产名跑同一选包逻辑，**串包数 0**（10058 及更早无共存资产时 coexist 为 `null`，符合预期）。
-  - **验证**：正式版与共存版**两个变体各跑一次**全量单测，均 **290 项 / 10 失败**（＝既有已知 10 项，**无新增**；285 + 5 新）。跑 sk2 变体是为确认 `BuildConfig` 引用在 sk2 下同样编译。
-  - **模拟器 e2e（`emulator-5554`，决定性证据）**：两变体各装 **10095 诊断包**（临时以 `-PVERSION_CODE=10095` 编译，仅用于让"有更新"成立；`firstInstallTime` 不变＝真升级）→ 关于页开「接收 Pre 版本推送」→「立即检查更新」→「下载并安装」→ 读 DownloadManager 实际入队 URL：
-    - `io.legado.app.sk2` → `…_10096_arm64-v8a_sk2-coexist.apk`
-    - `io.legado.app.c` → `…_10096_arm64-v8a.apk`
-    - 随后两包均恢复为 10096 正式产物；下载任务已取消、`/sdcard/Download` 无残留 APK。
-  - **产物**：正式版 36,172,524 字节 ＋ 共存版 36,172,182 字节；均 `10097` / `3.26.101615c` / 阅读SK / arm64-v8a / 8 dex / apksigner exit 0。已收进 `release/`（3 文件约定形态，已删 10096 两件套）。
-  - **已发布**：tag `v3.26.101615-10097`（Pre-release）；资产 `…_10097_arm64-v8a.apk` ＋ `…_10097_arm64-v8a_sk2-coexist.apk`。
-  - **下一次交付 versionCode 从 `10098` 递增。**
+- ⚠️ **10098（`3.26.101700c`）—— 已构建并模拟器验证，⏸ 按作者指示「不发布」**（修复备份按钮在全选时静默失效）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `56c28ee7`（三态决策 + 调用点修正 + 双回归锁）。
+  - **① 修复「默认备份内容全选时点备份没有任何反应」**：
+    - **根因**：10073 起 `BackupConfigFragment.backup` 写成 `selectBackupTargets() ?: return@launch`，把共享入口 `BackupTargetConfig.selectedTargetsOrNull()` 的 **`null`＝「全选」** 误当「中止」⇒ **未动过该设置的用户（默认全选）点「备份」毫无反应**：无进度框、无 toast、无文件。详见 §4「备份范围决策」条。
+    - **修法**：新增 `BackupScopeDecision` + 纯函数 `decideBackupScope()`，把「全选」与「中止」拆成互斥分支；调用点改 by-decision 收口。`selectedTargetsOrNull()` 未改（自动备份侧 null＝全打包是**正确**的）。
+    - **回归锁** `BackupScopeDecisionTest`（3 项，**直接调真实纯函数**）。
+  - **验证**：两变体各跑全量单测均 **293 项 / 10 失败**（＝既有基线，无新增）。**双向证伪**：① `null→Abort` ⇒ 1/3 RED；② 调用点整体退回 10073 形态 ⇒ 2/7 RED。
+  - **模拟器 e2e**：**先在 10097 上复现**（`backupUri` 已写入证明确实进入 `backup(path)`，但 zip md5 不变、无 toast、无日志）→ 装 10098 后三例全过：**全选**＝`开始备份` + zip 32,462 B + 「备份成功」；**空一项**＝成功且该目标不在包内；**全不勾**＝toast「未选择任何备份内容…」且不备份。
+  - **产物**：正式版 36,172,514 B ＋ 共存版 36,172,187 B；均 `10098` / `3.26.101700c` / 阅读SK / arm64-v8a / 8 dex / apksigner exit 0。已在 `release/`（3 文件约定）。⚠️ **此版从未发布 Release，`release/` 里的包删掉不可恢复；日后要发直接发这一版，不要重编。**
+
+- ✅ **10097（`3.26.101615c`）——历史交付，✅ 已发布 Pre-release（2026-10-16）**（修复共存版检查更新只会下到正式包）：详见 `companion/发布版更新记录.md` §1 的 10097 节。
 
 - ✅ **10096（`3.26.101625c`）——历史交付，✅ 已发布 Pre-release（2026-10-16）**（修复双击跳段/从本页听多跳段落 + 听书底部面板贴屏底）：详见 `companion/发布版更新记录.md` §1 的 10096 节。
 
-- ✅ **10094（`3.26.101530c`）——历史交付，✅ 已发布 Pre-release（2026-10-15）**（朗读 bug 修复 + 朗读界面更新）：详见 `companion/发布版更新记录.md` §1 的 10094 节。
-
-<!-- §6 仅保留最近 3 条交付；10089 / 10086 / 10081 / 10076 及更早的逐版净增量见 companion/发布版更新记录.md §1。 -->
+<!-- §6 仅保留最近 3 条交付；10094 / 10089 / 10086 / 10081 / 10076 及更早的逐版净增量见 companion/发布版更新记录.md §1。 -->
 
 ## 7. 当前机器环境与配套文档（2026-09-04 迁移后）
 
