@@ -162,8 +162,10 @@ $versionName = '3.26.<MMddHH>c'            # 完整版本名（含 c 后缀）
 - ⚠️ **共存版与正式版共用同一 `VERSION_CODE` / `VERSION_NAME`，不另加版本后缀**（`sk2` 刻意**没有** `versionNameSuffix`）。两条产物的版本事实必须逐字一致，便于回溯「同一个 10058」。
 - ⚠️ **两者同用 SDK debug 签名**：改的是包名不是签名，因此**不能互相覆盖安装**（这正是共存的前提）；也**不能覆盖安装阅读C**（签名不同，需走 §2 的数据迁移流程）。
 - ⚠️ **共存版是独立应用、独立数据**：包名不同 → `filesDir` / `getExternalFilesDir(null)`（缓存、书籍、主题、pref、DB）全部隔离，**不共享书架与进度**。它是"并行再装一份"，不是"共用数据"；要同步数据走应用内备份导出/导入（WebDAV 或本地 zip）。私有目录之外的**用户可见路径共用**（如 `/sdcard/Download/yuedu` 导出目录、WebDAV 目录名），互导时注意覆盖。
-- ⚠️ **无需为共存改任何源码**：隔离由 Android 平台按 `applicationId` 保证（不同包名 → 不同 uid / 数据沙箱 / `FileProvider` authority；manifest 中 `authorities` 全部是 `${applicationId}` 占位，`AppConst.authority` 取 `BuildConfig.APPLICATION_ID`）。共存版与正式版除包名外**无任何行为差异**（10059 起内置书源与其授权守卫已整体移除，见 §6）。
-- 共存版**不参与更新检查**（不含它自己的自动更新），但**发布时必须随正式版一同上传为 Release 资产**（2026-09-21 作者指示修正：此前写的「不发布 Release 资产」已作废，10065 起两个 APK 同时发布）。
+- ✅ **无需为共存做任何"隔离类"改造**：隔离由 Android 平台按 `applicationId` 保证（不同包名 → 不同 uid / 数据沙箱 / `FileProvider` authority；manifest 中 `authorities` 全部是 `${applicationId}` 占位，`AppConst.authority` 取 `BuildConfig.APPLICATION_ID`）。除下面这一处由包名差异**必然**派生出的分支外，两者行为一致（10059 起内置书源与其授权守卫已整体移除，见 §6）。
+  - ⚠️ **唯一按变体分支的地方：`UpdateManager` 选 Release 资产**（10097 引入）。两个 APK 同挂一个 Release，资产顺序 = 上传顺序，故**不能取"第一个 .apk"**，必须按文件名标记筛：正式版取无标记的，共存版取 `_sk2` 标记的（`selectUpdateAsset` + `isCoexistBuild()`）。**新增任何"从 Release 下包"的功能都必须走同一判据**，回归锁 `UpdateManagerAssetSelectionTest` 会挡住退化。
+- ✅ **共存版同样参与更新检查，且下载的是共存版自己的包**（10097 起；此前 `assets.firstOrNull { .apk }` 会让共存版下到**正式包**，装上去只新增/更新正式版 App，共存版永远升不上去 —— 这是它"看起来不参与更新检查"的真实原因）。发布时两个 APK 必须**同时**上传为 Release 资产（2026-09-21 作者指示修正：此前写的「不发布 Release 资产」已作废，10065 起两个 APK 同时发布）。
+  - ⚠️ 任一版本若**只发正式包**，共存版会判定"无我这一版"而提示已是最新（刻意如此：宁可误报最新，也不跨包名塞包）。故 10065 起的发布约定必须**成对上传**。
   - ⚠️ 发布说明里要**写清两者区别**：正式版可覆盖升级、与阅读C 签名不同不能互覆；共存版可与之三者并存、**独立数据不共享**、**不能覆盖安装正式版**。
 
 编译成功后必须把新 APK 收进仓库根已忽略的交付目录：
@@ -369,45 +371,36 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10097` 递增**（10096 为当前交付，本条随发布更新）。
+> **下一次交付 versionCode 从 `10098` 递增**（10097 为当前交付，本条随发布更新）。
 
 ---
 
-- ✅ **10096（`3.26.101625c`）——main 当前交付，✅ 已发布 Pre-release（2026-10-16）**（修复双击跳段/从本页听多跳段落 + 听书底部面板贴屏底）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。一个提交：`f47fe395`（重放上游 `68c06ed3` 串行准备 + 主线程确认令牌）。
-  - **① 双击跳段/从本页听「多跳段落」修复（`f47fe395`）**：作者报「双击跳段或从本页听有时多跳段落，目标段落离当前朗读段落越远跳得越多；只差一两段一般不犯」。
-    - **根因**：`newReadAloud` 以 `execute(executeContext = IO)` 跑在 **IO 线程池**，而 `prepareReadAloudChapter` 写一组**共享播放游标字段**（`contentList`/`nowSpeak`/`readAloudNumber`/`pageIndex`/`chapter`/`paragraphStartPos`）。旧请求的 prepare 与新请求的 prepare 在线程池上**交错写同一组字段**——`readAloudStartRequest`/`preparedReadAloudStartRequest` 只保护「**发布**」窗口，**不串行化「写入」**——`play()` 随后消费到**混合游标**，起点落到比目标更后的段落。两游标差值随「目标↔当前」距离增大，故作者观察到「差得越多跳得越多」。
-    - **上游已修**：`68c06ed3`「串行准备朗读并在主线程确认令牌发布状态」（2026-10-07）——`readAloudPrepareMutex.withLock` 串行化整段准备，并把「令牌复检 + 写回 + `play()`」收进 `withContext(Main)` 原子临界区。判据：`git merge-base --is-ancestor 68c06ed3 HEAD` → 否；`readAloudPrepareMutex` 在 HEAD 全库 **0 命中**。**10036 换基底时漏重放**（与 10095 的面板贴底同属「上游原生写法 + SK 后修补丁」丢失）。
-    - **修法**：`newReadAloud` 去掉 `executeContext = IO`、整段准备入 mutex、尾部收敛为单一 `withContext(Main)` 确认块，删除两处只做 check-then-act 的 SK 复检（上游主线程块内复检严格更强）；`cancelReadAloudStart` 改 `suspend` + `withContext(Main)`；`prepareReadAloudChapter` 不再自行 `publishParagraphProgress()`，进度发布随确认块同进临界区。重放后与上游该函数**逐行一致**（忽略注释，脚本比对过）。
-    - ⚠️ **保留 SK 的非崩溃策略**（`stopReadAloudOnInvalidPosition` 而非上游 `error()`）；**不采纳** `68c06ed3` 对 `SourceAudioReadAloudService.setPlaybackSpeed` 的回退——那是把 SK 的崩溃加固退回去。
-    - ⚠️ **诚实的未证实项**：「为什么最近才变频繁」**未定位到具体 10094 提交**——该竞态自 10036 就存在，10094 反而减少了会话重启（`d3a79ac7`）。不排除只是那几天听得多、暴露率上来。已按「已确认 / 仍是假设」标注，没有硬凑替罪羊。
-    - **回归锁 `ReadAloudStartRequestSerializationGuardTest`（4 项，源码级静态断言）**：`chapterPreparationIsSerializedByMutex`、`tokenConfirmationAndPlayShareOneMainThreadCriticalSection`、`startPathNoLongerRunsPrepareOnIoThreadPool`、`cancelAlsoConfirmsOnMainThread`。**4 轮编译有效注入全部 RED 且各命中对应断言**（mutex 改名 / `play` 退回 `launch(Main)` / 准备退回 IO / 取消改回 IO）。
-    - ⚠️ **新增假绿陷阱（实测踩到）：注入必须「编译有效」，且跑前要清掉旧结果目录**——删 mutex 字段那版**编译不过**，Test 任务根本没跑，脚本读到**上一次的旧 XML** 报了假 GREEN。判据：先看 `compileAppReleaseKotlin` 是否 error，再断言 RED；或注入后 `rm -rf` test-results 目录。
-    - ⚠️ **纠正子代理误判**：设备日志里「从本页读 + 双击换段」同毫秒成对出现**不是双触发**——`setAloudStart` 对两个入口都打「双击换段」这条日志，实际是**单次调用**（`从本页读` 那条来自 `restartFromPage`，`双击换段` 那条来自 `setAloudStart`，同一次手势各打一条）。
-  - **② 听书底部面板偶发贴屏底（10095 的修复，随本版一并交付）**：`10095` 未单独发布 Release，其修复已并入本版（10095/10096 同源，见下条）。
-  - **验证**：全量单测 **285 项 / 10 失败**（＝既有已知 10 项 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增**；281 + 4 新）。
-  - **模拟器回归（`emulator-5554`）**：正式版 `io.legado.app.c` 与共存版 `io.legado.app.sk2` 均 10095→10096 覆盖升级（`firstInstallTime` 均不变）；实机双击跳段 `pos:3100` → `位置发布 pos:3100 gen:8 confirmed:true prev:ch21:3188`，**精确落点、零偏移**，随后正常逐段推进。
-  - **产物**：正式版 36,172,287 字节 ＋ 共存版 36,171,859 字节；均 `10096` / `3.26.101625c` / 阅读SK / arm64-v8a / 8 dex / apksigner exit 0。已收进 `release/`（3 文件约定形态）。
-  - **已发布**：tag `v3.26.101625-10096`（Pre-release）；资产 `…_10096_arm64-v8a.apk` ＋ `…_10096_arm64-v8a_sk2-coexist.apk`（共存版资产名用 ASCII 后缀，上传时用 `gh release upload … "本地（共存版）.apk#目标名.apk"` 直接指定，避免中文名被静默截断）。
-  - **下一次交付 versionCode 从 `10097` 递增。**
+- ✅ **10097（`3.26.101615c`）——main 当前交付，✅ 已发布 Pre-release（2026-10-16）**（修复共存版检查更新只会下到正式包）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。两个提交：`b1be45b2`（按安装变体选 Release 资产 + 回归锁 + Test 输入声明）、`1ddf0a88`（变体判定提到循环外）。
+  - **① 修复「共存版检查更新只会下到正式版」（`b1be45b2`）**：作者报「共存版好像没有这个（检查更新并下载最新版）功能」。
+    - **结论：确实如此，且比"没有此功能"更糟**——共存版**有**入口、也会弹「发现新版本」，只是**下到的是正式包**（包名 `io.legado.app.c`），装上去表现为"更新了另一个 App"，共存版自身 versionCode 不变。
+    - **根因（依赖资产顺序，确定性缺陷、非竞态）**：`fetchLatestRelease` 对每个 Release 取 `release.assets.firstOrNull { it.name?.endsWith(".apk", true) == true }`。GitHub 的 `assets` **顺序 = 上传顺序**，发布流程固定先传正式版 ⇒ 共存版恒命中正式包。
+      - ⚠️ 这才是旧文「共存版不参与更新检查」的**真实原因**（该结论已在本节 §3 更正）。
+    - **修法**：新增 `selectUpdateAsset(assets, isCoexistBuild)`，按文件名**是否含 `_sk2`** 匹配（**与顺序无关**；现行 `_sk2-coexist`、早期 `_sk2` 都认），匹配不到返 **null**（跳过该 Release）；新增 `isCoexistBuild() = BuildConfig.APPLICATION_ID.endsWith(".sk2")`，在入口算一次。`parseVersionCodeFromAssetName` / `parseVersionKeyFromAssetName` 放开为 `internal` 供测试调用。
+    - ⚠️ **刻意"宁可误报最新"**：没有对应变体资产时返回 null 而不"随便挑一个"——绝不能给共存版塞包名不同的包。副作用是**某版本若只发正式包，共存版会收不到更新**。
+      - ⇒ **发布约定强化：10065 起必须成对上传两个 APK**（旧文只说"必须上传"，本条补上"不成对则共存版静默失去更新能力"）。
+    - ⚠️ **旧版共存版（≤10096）仍会取错包**，代码修复无法回溯修复已装机版本 ⇒ **10097 的共存包必须手动下载安装一次**，之后才能自更新（已写进发布说明）。
+  - **回归锁 `UpdateManagerAssetSelectionTest`（5 项）**：`assetChoiceDoesNotDependOnUploadOrder` / `variantsNeverCrossContaminate` / `missingVariantOrNonApkYieldsNull` / `legacyCoexistAssetNameStillRecognized` / `coexistAssetNameStillParsableForVersion`。
+    - ⚠️ **与仓库多数守卫测试不同：它直接调用真实函数**（`selectUpdateAsset` 是纯函数，不碰 `appCtx`/`BuildConfig`）⇒ 证明的是**行为**，不是"某行代码还在"。故它**不需要**在 `app/build.gradle` 里声明 `inputs.file`（class 字节本就是 Test 输入）；`isCoexistBuild()` 依赖 `BuildConfig`，测试不直接断言它。
+    - **2 轮编译有效注入均 RED**：① 选包退回「第一个 .apk」→ 3/5 RED；② 版本号正则退回上游 `_(\d+)\.apk$` → 1/5 RED。跑前均清空 `test-results`、并确认无 `e:` 编译错误（沿用 10096 的假绿判据）。
+    - **另有线上数据交叉核验**：对 45 个已发布 Release 的真实资产名跑同一选包逻辑，**串包数 0**（10058 及更早无共存资产时 coexist 为 `null`，符合预期）。
+  - **验证**：正式版与共存版**两个变体各跑一次**全量单测，均 **290 项 / 10 失败**（＝既有已知 10 项，**无新增**；285 + 5 新）。跑 sk2 变体是为确认 `BuildConfig` 引用在 sk2 下同样编译。
+  - **模拟器 e2e（`emulator-5554`，决定性证据）**：两变体各装 **10095 诊断包**（临时以 `-PVERSION_CODE=10095` 编译，仅用于让"有更新"成立；`firstInstallTime` 不变＝真升级）→ 关于页开「接收 Pre 版本推送」→「立即检查更新」→「下载并安装」→ 读 DownloadManager 实际入队 URL：
+    - `io.legado.app.sk2` → `…_10096_arm64-v8a_sk2-coexist.apk`
+    - `io.legado.app.c` → `…_10096_arm64-v8a.apk`
+    - 随后两包均恢复为 10096 正式产物；下载任务已取消、`/sdcard/Download` 无残留 APK。
+  - **产物**：正式版 36,172,524 字节 ＋ 共存版 36,172,182 字节；均 `10097` / `3.26.101615c` / 阅读SK / arm64-v8a / 8 dex / apksigner exit 0。已收进 `release/`（3 文件约定形态，已删 10096 两件套）。
+  - **已发布**：tag `v3.26.101615-10097`（Pre-release）；资产 `…_10097_arm64-v8a.apk` ＋ `…_10097_arm64-v8a_sk2-coexist.apk`。
+  - **下一次交付 versionCode 从 `10098` 递增。**
 
-- 📎 **10095（`3.26.101518c`）——未单独发布 Release，其修复已并入 10096**（听书底部面板偶发贴屏底）：详见 `companion/发布版更新记录.md` §1 的 10096 节第三节与 10095 节。逐版细节不再在此累积。
+- ✅ **10096（`3.26.101625c`）——历史交付，✅ 已发布 Pre-release（2026-10-16）**（修复双击跳段/从本页听多跳段落 + 听书底部面板贴屏底）：详见 `companion/发布版更新记录.md` §1 的 10096 节。
 
-- ✅ **10094（`3.26.101530c`）——历史交付，✅ 已发布 Pre-release（2026-10-15）**（朗读 bug 修复 + 朗读界面更新）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。六个提交：`58bb4e4f`（恢复播放端倍速兜底）、`7dfd9107`（HTTP 句内锚点）、`51d6329b`（TTS 句内锚点）、`e2c4758f`（句尾收尾守卫）、`c0dbc9f9`（跨章恢复回调）、`d3a79ac7`（调语速不重启会话）。
-  - **① 恢复「URL 无占位符的源走播放端倍速兜底」（`58bb4e4f`）**：恢复 10089 撤掉的 `httpTtsSupportsServerSpeed()` 子串启发式与播放端倍速兜底——实测该兜底是真功能（转发器 multiTTS 等无语速占位符的源靠它实现可调语速）。判定结果落日志（`服务端变速判定：…`）。
-  - **② 拖语速跳进度根治（`7dfd9107`/`51d6329b`/`d3a79ac7`）**：作者报「拖语速跳进度，往前往后都算」。
-    - **HTTP 链路锚点（`7dfd9107`）**：`upPlayPos()` 发布位置前先取真实播放位置（`start`/`anchor`），不再锚段首。
-    - **TTS 链路锚点（`51d6329b`）**：`upWavPlayPos()` 同构修复。
-    - **调语速不再重启会话（`d3a79ac7`，最终根因）**：模拟器+真机 logcat 实证——speak 队列模式下拖语速触发 `playStop()+play()` 会话重启，multiTTS live 会话被打断后**预加载队列被瞬间逐句"完成"（每句 5~10ms）**，朗读游标 0.3s 被拽过整个预加载窗口（实测 2298→2699 十个段落），下次重启音频直接跳到游标位置。段首/句尾是会话切换最脆弱时刻，故作者观察为"边界处必现"。修法：`upSpeechRate` 只 `setSpeechRate`，新语速从**下一句**生效（固有取舍，已向作者说明）；`e2c4758f` 的 800ms 收尾守卫随重启路径一并删除。
-    - ⚠️ **方法论**：两台设备的 wav 标记 0 条 ⇒ 先修的 wav 侧守卫（`e2c4758f`）从未执行。**先抓 logcat 证实实际代码路径，再修**——本轮前两次修复（锚点、收尾守卫）都因未先证实路径而绕了远路。
-  - **③ 章节连接处停驻修复（`c0dbc9f9`）**：作者报「听书有时停在章节末/标题处（非暂停），手动介入才恢复」。根因：跨章时 `curPageChanged(fromReadAloud=true)` 只挂 `pendingReadAloudChapterSync` 标志，而 `contentLoadFinish` 的预加载分支（offset `±1`）排版完成后**不回调** `curPageChanged` → 标志永远无消费者。修法：新增 `ensureReadAloudPendingSyncResumed()`，在两个预加载分支排版完成后补发回调。作者实测已确认修复。
-  - **回归锁**：`AudioPlayReadAloudSettingGuardTest` 新增 4 项（HTTP/TTS 锚点序关系、收尾守卫→更替为 `speechRateChangeNeverRestartsSession`、跨章恢复钩子），本类 14/14。⚠️ 注释含断言字面量会假红（`playStop()` 出现在注释里 → 用 `lastIndexOf` 或改注释措辞）。
-  - **验证**：全量单测 **278 项 / 10 失败**（＝既有已知 10 项 `CacheTaskStoreTest` ×9 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`，**无新增**）。
-  - **实机回归**：手机 `72a2b362`（10093→10094 覆盖升级）、平板 `HA1KAPWG`（10090→10094）、模拟器 `emulator-5554`（10090→10094），`firstInstallTime` 均不变。作者确认「暂时感觉没什么问题」；章节停驻已实测修复，拖语速跳进度待长期观察。
-  - **产物**：正式版 36,171,723 字节 ＋ 共存版 36,171,231 字节；均 `10094` / `3.26.101530c` / 阅读SK / arm64-v8a / apksigner exit 0。已收进 `release/`（3 文件约定形态，已删 10089 三件套）。
-    - ⚠️ 10090–10093 为 sk2-only 诊断/验证构建（位置探针、边界修复验证），不发布、不入 `release/`。
-  - **下一次交付 versionCode 从 `10095` 递增。**
+- ✅ **10094（`3.26.101530c`）——历史交付，✅ 已发布 Pre-release（2026-10-15）**（朗读 bug 修复 + 朗读界面更新）：详见 `companion/发布版更新记录.md` §1 的 10094 节。
 
 <!-- §6 仅保留最近 3 条交付；10089 / 10086 / 10081 / 10076 及更早的逐版净增量见 companion/发布版更新记录.md §1。 -->
 
