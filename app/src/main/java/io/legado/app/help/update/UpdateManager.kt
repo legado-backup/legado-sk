@@ -102,8 +102,10 @@ object UpdateManager {
         // versionCode 必须从 APK 资产文件名解析（legado_app_3.26.081303_10539.apk -> 10539），
         // 不能从 tag 解析：tag 是版本名格式（v3.26.081303c），里面的数字是 MMddHH，
         // 提取出来会是 81303 这种假版本号，永远大于真实 versionCode，导致误报"发现新版本"。
+        // 本进程是正式版还是共存版，决定从每个 Release 里挑哪个 APK（见 selectUpdateAsset）
+        val isCoexist = isCoexistBuild()
         val candidates = eligible.mapNotNull { release ->
-            val asset = selectUpdateAsset(release.assets, isCoexistBuild())
+            val asset = selectUpdateAsset(release.assets, isCoexist)
                 ?: return@mapNotNull null
             val code = parseVersionCodeFromAssetName(asset.name) ?: return@mapNotNull null
             // versionName 中的编译时刻(MMddHH): 同 versionCode 时用于区分新旧,
