@@ -172,7 +172,9 @@ $versionName = '3.26.<MMddHH>c'            # 完整版本名（含 c 后缀）
 1. 覆盖 `C:\code\ai-code\legado-sk\release\legado-sk-arm64-v8a.apk`（「当前交付 APK」，固定名；`/release` 已被 .gitignore 忽略）。
 2. 按版本命名同存于 `C:\code\ai-code\legado-sk\release\`：`legado_sk_<versionName>c_<versionCode>_arm64-v8a.apk`。
 3. 共存版同存于 `C:\code\ai-code\legado-sk\release\`：`legado_sk_<versionName>c_<versionCode>_arm64-v8a_（共存版）.apk`（本地文件名带「（共存版）」，让用户一眼分清哪个能共存）。
-   - ⚠️ **GitHub Release 资产名不支持非 ASCII 字符**：上传 `…_（共存版）.apk` 会被静默截断成 `…_arm64-v8a_.apk`（实测；用 API `PATCH` 改名为中文会得到 `default.apk`）。**Release 资产名一律用 ASCII 后缀 `_sk2-coexist`**，并在发布说明里写明它就是共存版。
+   - ⚠️ **GitHub Release 资产名不支持非 ASCII 字符**：上传 `…_（共存版）.apk` 会被静默截断成 `…_arm64-v8a_.apk`（实测，10097 复现）。**Release 资产名一律用 ASCII 后缀 `_sk2-coexist`**，并在发布说明里写明它就是共存版。
+     - ⚠️ **`gh release upload "本地路径#目标名"` 的 rename 语法只在本地名是 ASCII 时有效**（10097 实测：本地名含中文时目标名不生效，只得到规整后的 ASCII 名，「用 `#` 就能指定目标名」是**错记**）。稳妥做法：**先把本地文件改名为纯 ASCII 再上传**，或上传后用 `gh api -X PATCH repos/skxingyu/legado-sk/releases/assets/<id> -f name='…_sk2-coexist.apk'` 改名。
+     - ⚠️ **资产名必须含 `_sk2`**：这是共存版更新检查识别"自己那一版"的唯一标记（见下方 `UpdateManager` 条），漏了就静默失去更新能力。上传后**务必** `gh api … --jq '.assets[].name'` 复核。
 4. ⚠️ **`release/` 只保留最新版本**（2026-09-30 作者指示）：一旦新版本构建完成并收集齐，**删掉上一版及更早的本地 APK**（历史版本从 GitHub Release 重新下载即可）。目录里应只有 `legado-sk-arm64-v8a.apk`（固定名）+ 当前版本的两个包，共 3 个文件。
    - ⚠️ **例外**：**从未发布过 Release 的版本删掉即不可恢复**（GitHub 上没有）。若某版本临时未发布且日后可能要用，删除前先向作者确认。
 
