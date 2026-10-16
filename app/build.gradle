@@ -251,6 +251,11 @@ android {
                 "src/main/java/io/legado/app/ui/book/read/page/PageView.kt"
         ).withPropertyName("readAloudPanelPositionGuardSources")
                 .withPathSensitivity(PathSensitivity.RELATIVE)
+        // ReadAloudStartRequestSerializationGuardTest 断言朗读起点「串行准备 + 主线程确认令牌」，
+        // 同属源码级静态断言，同样必须声明为 Test 输入（理由同上）。
+        inputs.file("src/main/java/io/legado/app/service/BaseReadAloudService.kt")
+                .withPropertyName("readAloudStartSerializationGuardSource")
+                .withPathSensitivity(PathSensitivity.RELATIVE)
     }
     lint { //忽略string翻译缺失，后面需要翻译时去掉，todo
         checkDependencies = false

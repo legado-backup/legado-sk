@@ -88,6 +88,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import splitties.init.appCtx
 import splitties.systemservices.audioManager
 import splitties.systemservices.notificationManager
@@ -331,6 +334,7 @@ abstract class BaseReadAloudService : BaseService(),
 
     @Volatile
     private var preparedReadAloudStartRequest = -1L
+    private val readAloudPrepareMutex = Mutex()
 
     internal fun minReadAloudPreloadLength(): Int {
         return MIN_READ_ALOUD_PRELOAD_LENGTH
@@ -1118,48 +1122,47 @@ abstract class BaseReadAloudService : BaseService(),
         pageIndex: Int,
         startPos: Int,
     ) {
-        execute(executeContext = IO) {
-            if (request != readAloudStartRequest) return@execute
-            val textChapter = ReadBook.curTextChapter
-            if (!sessionChapterCanStartWithoutText) {
-                val chapter = textChapter ?: run {
-                    cancelReadAloudStart(request)
-                    return@execute
+        // SK 定制（重放上游 68c06ed3）：串行准备 + 主线程确认令牌。
+        // 章节准备会改共享播放字段（contentList/nowSpeak/readAloudNumber/pageIndex…），
+        // 旧请求必须退出后新请求才能准备；否则两个请求的 prepare 在 IO 线程池上交错
+        // 写同一组字段，play() 消费到的是混合游标——表现为双击/从本页听多跳段落。
+        execute {
+            readAloudPrepareMutex.withLock {
+                if (request != readAloudStartRequest) return@withLock
+                val textChapter = ReadBook.curTextChapter
+                var preparedText = false
+                if (!sessionChapterCanStartWithoutText) {
+                    if (textChapter == null ||
+                        !prepareReadAloudChapter(textChapter, pageIndex, startPos)
+                    ) {
+                        cancelReadAloudStart(request)
+                        return@withLock
+                    }
+                    preparedText = true
+                } else {
+                    // 书源音频：会话章节身份先由统一阅读目标（ReadBook.durChapterIndex）确定，
+                    // 正文 TextChapter 只在 index 与该目标相同时用于段落/LRC 准备，绝不反向决定当前章节。
+                    currentChapterIndex = ReadBook.durChapterIndex
+                    textChapter?.takeIf { tc ->
+                        tc.chapter.index == currentChapterIndex &&
+                            tc.isCompleted && tc.pageSize > 0
+                    }?.let { tc ->
+                        if (!prepareReadAloudChapter(tc, pageIndex, startPos)) {
+                            cancelReadAloudStart(request)
+                            return@withLock
+                        }
+                        preparedText = true
+                    }
                 }
-                if (!prepareReadAloudChapter(chapter, pageIndex, startPos)) {
-                    cancelReadAloudStart(request)
-                    return@execute
-                }
-                // SK 定制（审查修复）：prepare 期间可能被新请求（N2）打断——IO 协程
-                // 无挂起点仍可被线程抢占。写回前复查令牌，避免过期请求压掉 N2 的状态。
-                if (request != readAloudStartRequest) return@execute
-                preparedReadAloudStartRequest = request
-                publishPreparedAloudPosition()
-                launch(Main) {
-                    if (request != readAloudStartRequest) return@launch
+                // 与 requestReadAloud 的令牌递增同在主线程，中间没有挂起点：
+                // 令牌复检、写回与 play() 必须构成一个原子临界区。
+                withContext(Main) {
+                    if (request != readAloudStartRequest) return@withContext
+                    preparedReadAloudStartRequest = request
+                    if (preparedText) publishParagraphProgress()
+                    publishPreparedAloudPosition()
                     if (play) play() else pageChanged = true
                 }
-                return@execute
-            }
-            // 书源音频：会话章节身份先由统一阅读目标（ReadBook.durChapterIndex）确定，
-            // 正文 TextChapter 只在 index 与该目标相同时用于段落/LRC 准备，绝不反向决定当前章节。
-            currentChapterIndex = ReadBook.durChapterIndex
-            textChapter?.takeIf { tc ->
-                tc.chapter.index == currentChapterIndex &&
-                    tc.isCompleted && tc.pageSize > 0
-            }?.let { tc ->
-                if (!prepareReadAloudChapter(tc, pageIndex, startPos)) {
-                    cancelReadAloudStart(request)
-                    return@execute
-                }
-            }
-            // SK 定制（审查修复）：同上，prepare 完成后写回前复查令牌。
-            if (request != readAloudStartRequest) return@execute
-            preparedReadAloudStartRequest = request
-            publishPreparedAloudPosition()
-            launch(Main) {
-                if (request != readAloudStartRequest) return@launch
-                if (play) play() else pageChanged = true
             }
         }.onError {
             cancelReadAloudStart(request)
@@ -1167,8 +1170,9 @@ abstract class BaseReadAloudService : BaseService(),
         }
     }
 
-    private fun cancelReadAloudStart(request: Long) {
-        if (request != readAloudStartRequest) return
+    // SK 定制（重放上游 68c06ed3）：与令牌递增同在主线程，避免过期请求清掉新请求状态。
+    private suspend fun cancelReadAloudStart(request: Long) = withContext(Main) {
+        if (request != readAloudStartRequest) return@withContext
         preparedReadAloudStartRequest = -1L
         ReadAloud.cancelPositionSwitch()
     }
@@ -1218,7 +1222,7 @@ abstract class BaseReadAloudService : BaseService(),
                 "number:$readAloudNumber nowSpeak:$nowSpeak offset:$paragraphStartPos " +
                 "byPage:$pageSplit toLast:${chapter.getLastParagraphPosition() == readAloudNumber}"
         )
-        publishParagraphProgress()
+        // 进度发布移到 newReadAloud 的主线程确认块，与令牌写回同一临界区。
         return true
     }
 
