@@ -39,6 +39,7 @@ import io.legado.app.help.book.update
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.coroutine.Coroutine
 import io.legado.app.help.exoplayer.ExoPlayerHelper
+import io.legado.app.help.exoplayer.MediaStreamCacheJanitor
 import io.legado.app.help.globalExecutor
 import io.legado.app.help.gsyVideo.ExoVideoManager
 import io.legado.app.help.gsyVideo.ExoVideoManager.Companion.FULLSCREEN_ID
@@ -163,6 +164,7 @@ object VideoPlay : CoroutineScope by MainScope(){
      */
     fun startPlay(player: StandardGSYVideoPlayer) {
         if (source == null) return
+        book?.let(MediaStreamCacheJanitor::onPlaybackStarted)
         danmakuStr = null
         danmakuFile = null
         val player = player.getCurrentPlayer()

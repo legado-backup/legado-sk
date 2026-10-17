@@ -46,6 +46,7 @@ import io.legado.app.help.config.ThemeConfig.applyDayNight
 import io.legado.app.help.config.ThemeConfig.applyDayNightInit
 import io.legado.app.help.config.ThemeConfig.installDefaultBackgrounds
 import io.legado.app.help.coroutine.Coroutine
+import io.legado.app.help.exoplayer.MediaStreamCacheJanitor
 import io.legado.app.help.http.Cronet
 import io.legado.app.help.http.ObsoleteUrlFactory
 import io.legado.app.help.http.okHttpClient
@@ -121,6 +122,8 @@ class App : Application() {
             }
             RuleBigDataHelp.clearInvalid()
             BookHelp.clearInvalidCache()
+            // 媒体流缓存全局兜底：回收上次进程被杀/异常退出留下的播放缓存
+            MediaStreamCacheJanitor.enforceBudget()
             Backup.clearCache()
             ReadBookConfig.clearBgAndCache()
 //            ThemeConfig.clearBg() //每次手动切换主题时清理多余图片

@@ -14,6 +14,7 @@ import io.legado.app.help.book.AudioTextMapping
 import io.legado.app.help.book.SourceAudioResolver
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.exoplayer.ExoPlayerHelper
+import io.legado.app.help.exoplayer.MediaStreamCacheJanitor
 import io.legado.app.model.ReadBook
 import io.legado.app.utils.isJsonArray
 import io.legado.app.utils.servicePendingIntent
@@ -61,6 +62,7 @@ class SourceAudioReadAloudService : BaseReadAloudService(), Player.Listener {
             return
         }
         val book = ReadBook.book ?: return failPlayback("书源音频启动失败：当前书籍为空")
+        MediaStreamCacheJanitor.onPlaybackStarted(book)
         val chapter = resolveCurrentChapter(book)
             ?: return failPlayback("书源音频启动失败：当前章节为空")
         currentChapter = chapter
@@ -384,6 +386,7 @@ class SourceAudioReadAloudService : BaseReadAloudService(), Player.Listener {
         player.removeListener(this)
         player.release()
         currentMediaUrl = null
+        ReadBook.book?.let { MediaStreamCacheJanitor.onPlaybackStopped(it) }
         super.onDestroy()
     }
 

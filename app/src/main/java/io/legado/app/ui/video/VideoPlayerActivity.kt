@@ -49,6 +49,7 @@ import io.legado.app.help.book.removeType
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.ThemeConfig
 import io.legado.app.help.exoplayer.ExoPlayerHelper
+import io.legado.app.help.exoplayer.MediaStreamCacheJanitor
 import io.legado.app.help.gsyVideo.VideoPlayer
 import io.legado.app.help.webView.PooledWebView
 import io.legado.app.help.webView.WebJsExtensions
@@ -169,6 +170,8 @@ class VideoPlayerActivity : VMBaseActivity<ActivityVideoPlayerBinding, VideoPlay
     private var isFullScreen = false
     private var isBottomPanelExpanded = false
     private var isRecreatingForTheme = false
+    /** 本页已把播放交接给悬浮窗（VideoPlayService）：那时不能清扫缓存。 */
+    private var handedToFloatingWindow = false
     private var preparedVideoStarted = false
     private var detailTabIndex = 0
     private var orientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -1194,6 +1197,8 @@ class VideoPlayerActivity : VMBaseActivity<ActivityVideoPlayerBinding, VideoPlay
 
     private fun startFloatingWindow() {
         VideoPlay.savePlayState(playerView)
+        // 交接给悬浮窗继续播放：本页 onDestroy 不得清扫缓存
+        handedToFloatingWindow = true
         // 启动悬浮窗服务
         val intent = Intent(this, VideoPlayService::class.java).apply {
             putExtra("isNew", false)
@@ -1306,7 +1311,14 @@ class VideoPlayerActivity : VMBaseActivity<ActivityVideoPlayerBinding, VideoPlay
         }
         if (!isRecreatingForTheme) {
             VideoPlay.stopLoading()
+            // 先取书，release() 会把 VideoPlay.book 置空
+            val playedBook = VideoPlay.book
             playerView.getCurrentPlayer().release()
+            // 离开播放页即排程清扫本书的流缓存（8s 内重进会取消）。
+            // 交给悬浮窗继续播放时不清扫——那条路径由 VideoPlayService.onDestroy 负责。
+            if (!handedToFloatingWindow) {
+                playedBook?.let { MediaStreamCacheJanitor.onPlaybackStopped(it) }
+            }
         }
         setVideoKeepScreenOn(false)
     }

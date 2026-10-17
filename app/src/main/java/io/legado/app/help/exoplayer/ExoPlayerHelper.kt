@@ -259,6 +259,14 @@ object ExoPlayerHelper {
         releaseCache(videoBookCacheDir(book))
     }
 
+    /**
+     * 释放仍然打开的 SimpleCache 实例。删除缓存目录前必须先调用，否则文件
+     * 仍被持有（SimpleCache 在 delete 后仍会因句柄存在而写回索引）而删不净。
+     */
+    fun releaseCacheDirectories(vararg dirs: File) {
+        dirs.forEach(::releaseCache)
+    }
+
     private fun releaseCache(dir: File) {
         val path = dir.absolutePath
         synchronized(cacheLock) {
@@ -267,11 +275,14 @@ object ExoPlayerHelper {
     }
 
     private fun audioCache(book: Book? = null): Cache {
-        return simpleCache(book?.let(::audioBookCacheDir) ?: legacyAudioCacheDir, AUDIO_OFFLINE_CACHE_MAX_BYTES)
+        return simpleCache(
+            book?.let(::audioBookCacheDir) ?: legacyAudioCacheDir,
+            MEDIA_STREAM_CACHE_BUDGET_BYTES
+        )
     }
 
     private fun videoCache(cacheDir: File? = null): Cache {
-        return simpleCache(cacheDir ?: legacyVideoCacheDir, VIDEO_CACHE_MAX_BYTES)
+        return simpleCache(cacheDir ?: legacyVideoCacheDir, MEDIA_STREAM_CACHE_BUDGET_BYTES)
     }
 
     private val legacyAudioCacheDir: File
@@ -829,12 +840,11 @@ object ExoPlayerHelper {
         val headers: Map<String, String> = emptyMap()
     )
 
-    private const val AUDIO_OFFLINE_CACHE_MAX_BYTES = 4L * 1024 * 1024 * 1024
-    private const val VIDEO_CACHE_MAX_BYTES = 4L * 1024 * 1024 * 1024
-    private const val AUDIO_BOOK_CACHE_DIR = "audio_media"
-    private const val VIDEO_BOOK_CACHE_DIR = "video_media"
-    private const val AUDIO_BOOK_COMPLETE_DIR = "audio_media_complete"
-    private const val VIDEO_BOOK_COMPLETE_DIR = "video_media_complete"
+    /** 按书建立的流缓存目录名；清理侧（MediaStreamCacheJanitor）与本文件必须同源。 */
+    internal const val AUDIO_BOOK_CACHE_DIR = "audio_media"
+    internal const val VIDEO_BOOK_CACHE_DIR = "video_media"
+    internal const val AUDIO_BOOK_COMPLETE_DIR = "audio_media_complete"
+    internal const val VIDEO_BOOK_COMPLETE_DIR = "video_media_complete"
     private const val VIDEO_PRELOAD_DURATION_MS = 5L * 60 * 1000
     private const val VIDEO_PRELOAD_BYTES_PER_SECOND = 256L * 1024
     private const val COMPLETE_MARKER_VERSION = "media_downloader_v2"

@@ -44,6 +44,7 @@ import io.legado.app.help.MediaHelp
 import io.legado.app.help.coroutine.Coroutine
 import io.legado.app.help.glide.ImageLoader
 import io.legado.app.help.gsyVideo.FloatingPlayer
+import io.legado.app.help.exoplayer.MediaStreamCacheJanitor
 import io.legado.app.model.VideoPlay
 import io.legado.app.receiver.MediaButtonReceiver
 import io.legado.app.ui.video.VideoPlayerActivity
@@ -78,6 +79,8 @@ class VideoPlayService : BaseService() {
     }
     private val playerView by lazy { floatingView.findViewById<FloatingPlayer>(R.id.floatingPlayerView) }
     private var isNew = true
+    /** 已把播放交接回全屏播放页：本次 onDestroy 不能清扫缓存。 */
+    private var handedToPlayerActivity = false
     private var upNotificationJob: Coroutine<*>? = null
     private var animator: SpringAnimation? = null
     private var cover: Bitmap =
@@ -613,6 +616,8 @@ class VideoPlayService : BaseService() {
 
     private fun toggleFullScreen() {
         VideoPlay.savePlayState(playerView)
+        // 交接回播放页继续播放：本次 onDestroy 不得清扫缓存
+        handedToPlayerActivity = true
         val fullscreenIntent = Intent(this, VideoPlayerActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             putExtra("isNew", false)
@@ -647,6 +652,8 @@ class VideoPlayService : BaseService() {
             VideoPlay.upReadTime()
         }
         VideoPlay.saveRead()
+        // 先取书：playerView.release() → releaseAllVideos() 会把 VideoPlay.book 置空
+        val playedBook = VideoPlay.book
         try {
             if (::windowManager.isInitialized && floatingView.parent != null) {
                 windowManager.removeView(floatingView)
@@ -661,6 +668,11 @@ class VideoPlayService : BaseService() {
             playerView.release()
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+        // 悬浮窗关闭 = 视频真正退出（这是此前漏掉的最大一块缓存来源）；
+        // 交接回播放页时不清扫，由 VideoPlayerActivity.onDestroy 负责。
+        if (!handedToPlayerActivity) {
+            playedBook?.let { MediaStreamCacheJanitor.onPlaybackStopped(it) }
         }
     }
 

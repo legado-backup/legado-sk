@@ -17,6 +17,7 @@ import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookChapter
 import io.legado.app.help.ai.AiChapterPurifyService
 import io.legado.app.help.exoplayer.ExoPlayerHelper
+import io.legado.app.help.exoplayer.MediaStreamCacheJanitor
 import io.legado.app.help.book.BookHelp
 import io.legado.app.help.book.AudioOfflineState
 import io.legado.app.help.book.BodyOfflineState
@@ -758,12 +759,14 @@ class CacheManageViewModel(application: Application) : BaseViewModel(application
         val knownExternal = listOf(
             CacheStorageGroup(
                 context.getString(R.string.cache_manage_storage_audio_offline),
-                listOf(File(externalCache, "audio_exoplayer"), File(externalCache, "audio_exoplayer_complete")),
+                listOf(File(externalCache, "audio_exoplayer"), File(externalCache, "audio_exoplayer_complete")) +
+                    MediaStreamCacheJanitor.streamCacheDirs(video = false),
                 CacheStorageDeleteTarget.AUDIO
             ),
             CacheStorageGroup(
                 context.getString(R.string.cache_manage_storage_video_preload),
-                listOf(File(externalCache, "exoplayer"), File(externalCache, "exoplayer_complete")),
+                listOf(File(externalCache, "exoplayer"), File(externalCache, "exoplayer_complete")) +
+                    MediaStreamCacheJanitor.streamCacheDirs(video = true),
                 CacheStorageDeleteTarget.VIDEO
             ),
             CacheStorageGroup(
@@ -968,10 +971,12 @@ class CacheManageViewModel(application: Application) : BaseViewModel(application
             }
             CacheStorageDeleteTarget.AUDIO -> {
                 ExoPlayerHelper.clearAudioCache()
+                MediaStreamCacheJanitor.clearStreamCaches(video = false)
                 emptyList()
             }
             CacheStorageDeleteTarget.VIDEO -> {
                 ExoPlayerHelper.clearVideoCache()
+                MediaStreamCacheJanitor.clearStreamCaches(video = true)
                 emptyList()
             }
             CacheStorageDeleteTarget.PLAYER_TEMP -> listOf(File(externalCache, "video_temp"), File(externalCache, "video_temp_cache"))
