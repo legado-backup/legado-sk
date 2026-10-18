@@ -16,7 +16,6 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewTreeObserver
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageButton
@@ -25,6 +24,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.get
 import androidx.core.view.doOnLayout
+import androidx.core.view.doOnPreDraw
 import androidx.core.view.isVisible
 import androidx.core.view.setPadding
 import androidx.core.view.size
@@ -2141,15 +2141,16 @@ class ReadBookActivity : BaseReadBookActivity(),
             ?: return
         val margin = tryReadAloudPanelBottomMargin(panelHeight)
         if (margin == null) {
-            // 页面/页脚布局尚未就绪：保持悬浮窗隐藏，待页面布局变化后再定位，
+            // 页面/页脚布局尚未就绪：保持悬浮窗隐藏，待下一次预绘制再定位，
             // 避免以错误的贴底位置闪现。页面内容异步加载完成后页脚即可测量。
-            val viewTree = binding.readView.viewTreeObserver
-            viewTree.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
-                override fun onGlobalLayout() {
-                    viewTree.removeOnGlobalLayoutListener(this)
-                    positionAndRevealReadAloudPanel(panel, panelMode, onReveal)
-                }
-            })
+            //
+            // ⚠️ 必须用 doOnPreDraw，不能把 viewTreeObserver 缓存到局部再自行移除监听：
+            // onCreate 阶段 readView 尚未 attach，此时拿到的是 View 内部的临时
+            // "floating" observer，attach 时它的监听被 merge 进真实 observer 并 kill()。
+            // 回调里对那份缓存引用调 removeOnGlobalLayoutListener 会命中
+            // ViewTreeObserver.checkIsAlive() → IllegalStateException（10100 实机崩溃）。
+            // androidx 的 OneShotPreDrawListener 每次从 View 现取 observer，故不踩此坑。
+            panel.doOnPreDraw { positionAndRevealReadAloudPanel(panel, panelMode, onReveal) }
             return
         }
         val params = panel.layoutParams as? FrameLayout.LayoutParams

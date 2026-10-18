@@ -143,9 +143,23 @@ class ReadAloudPanelPositionGuardTest {
             source.contains("private fun tryReadAloudPanelBottomMargin(panelHeight: Int): Int? {")
         )
         assertTrue(
-            "margin 未就绪时必须注册下一次全局布局再重试，否则面板永久停在错误位置",
-            helper.contains("addOnGlobalLayoutListener") &&
+            "margin 未就绪时必须挂下一次预绘制再重试，否则面板永久停在错误位置",
+            helper.contains("doOnPreDraw") &&
                 helper.contains("positionAndRevealReadAloudPanel(panel, panelMode, onReveal)")
+        )
+        // 10100 实机崩溃（crash-2026-10-18-07-55-13）：onCreate 里 updateReadAloudPanels()
+        // → 面板未就绪 → 把 binding.readView.viewTreeObserver 存进局部 viewTree，
+        // 但此时 readView 还没 attach，拿到的只是 View 内部的临时 "floating" observer；
+        // attach 时 View.dispatchAttachedToWindow 用 info.mTreeObserver.merge() 把它的
+        // 监听搬进真实 observer，并 kill() 掉这份临时对象。监听照样被派发，可回调里
+        // 对**旧引用**调 removeOnGlobalLayoutListener → checkIsAlive() 抛
+        // IllegalStateException，主线程必崩。故该写法整体禁止，改用 androidx
+        // OneShotPreDrawListener（每次从 View 现取 observer，且有 isAlive 守卫）。
+        assertFalse(
+            "禁止缓存 viewTreeObserver 局部引用后自行移除监听：onCreate 阶段拿到的是临时 " +
+                "floating observer，attach 时被 merge+kill，回调中对旧引用移除必然崩溃（10100 实机）",
+            helper.contains("removeOnGlobalLayoutListener") ||
+                helper.contains("viewTreeObserver")
         )
         assertTrue(
             "算不出正确位置时必须保持隐藏（panel.gone()），不能先以贴底位置显示",
