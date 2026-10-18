@@ -18,6 +18,7 @@ import io.legado.app.constant.AppConst
 import io.legado.app.constant.AppLog
 import io.legado.app.constant.AppPattern
 import io.legado.app.constant.LogModule
+import io.legado.app.data.appDb
 import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookChapter
 import io.legado.app.exception.NoStackTraceException
@@ -138,15 +139,20 @@ class TTSReadAloudService : BaseReadAloudService() {
 
     override fun onDestroy() {
         // 退出清扫：只留当前章，其余 tts_cache 章节目录全删（批量预缓存章豁免）。
-        // 必须在 super.onDestroy() 之前取状态——基类会清 runningClass / progress。
+        // 章节身份用 currentChapterIndex（引擎私有光标）而不是 textChapter：后者在
+        // 退出流程中可能已被清空，用它会导致清扫静默不登记（已实机复现）。
         runCatching {
             val book = ReadBook.book
-            val chapter = textChapter?.chapter
-            if (book != null && chapter != null) {
-                TtsCacheJanitor.onAloudStopped(
-                    book,
-                    setOf(TtsCacheStore.chapterStem(chapter)),
-                )
+            val chapterIndex = currentChapterIndex
+            if (book != null && chapterIndex >= 0) {
+                val chapter = appDb.bookChapterDao.getChapter(book.bookUrl, chapterIndex)
+                val keepStem = if (chapter != null) {
+                    TtsCacheStore.chapterStem(chapter)
+                } else {
+                    // 章节查不到（被换源/删除）：不保留任何章，只保留批量预缓存章
+                    null
+                }
+                TtsCacheJanitor.onAloudStopped(book, listOfNotNull(keepStem).toSet())
             }
         }.onFailure { AppLog.put("TTS 缓存清扫登记失败: ${it.localizedMessage}", it) }
         super.onDestroy()

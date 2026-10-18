@@ -77,26 +77,22 @@ object TtsCacheJanitor {
     }
 
     /**
-     * App 启动兜底：清扫所有书。只有 [currentBook] 能确定当前章（保留它），
-     * 其余书保留空集 —— 批量预缓存章在任何情况下仍然豁免。
+     * App 启动兜底：清扫所有书，每本保留**它自己持久化的当前章**
+     * （`books.durChapterIndex`）。
+     *
+     * ⚠️ 不能用 `ReadBook.book` 判断当前章：那是内存态，冷启动时必然为 null，
+     * 保留集会退化成空集（见 `emptyKeepDeletesAllUnmarked`），把「上次听书的
+     * 那一章」也当过期缓存删掉。进度持久化在书表里，只能从那里取。
      */
-    fun enforceOnStartup(currentBook: Book?) {
+    fun enforceOnStartup() {
         scope.launch {
             runCatching {
-                val keepStem = currentBook?.let { book ->
-                    appDb.bookChapterDao
-                        .getChapter(book.bookUrl, book.durChapterIndex)
-                        ?.let(TtsCacheStore::chapterStem)
-                }
-                // 缓存目录名由 name + bookUrl 共同决定，只能拿书架反算，无法反查 DAO。
                 appDb.bookDao.all.forEach { book ->
                     if (!TtsCacheStore.ttsCacheDir(book).isDirectory) return@forEach
-                    val keep = if (book.bookUrl == currentBook?.bookUrl) {
-                        listOfNotNull(keepStem).toSet()
-                    } else {
-                        emptySet()
-                    }
-                    sweep(book, keep)
+                    val keepStem = appDb.bookChapterDao
+                        .getChapter(book.bookUrl, book.durChapterIndex)
+                        ?.let(TtsCacheStore::chapterStem)
+                    sweep(book, listOfNotNull(keepStem).toSet())
                 }
             }.onFailure { AppLog.put("TTS 缓存启动清扫失败: ${it.localizedMessage}", it) }
         }
