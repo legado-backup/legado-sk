@@ -256,6 +256,11 @@ android {
         inputs.file("src/main/java/io/legado/app/service/BaseReadAloudService.kt")
                 .withPropertyName("readAloudStartSerializationGuardSource")
                 .withPathSensitivity(PathSensitivity.RELATIVE)
+        // ReadAloudStartPreparedGuardTest 断言 TTS 引擎 play() 里「空列表」的两种含义，
+        // 同为源码级静态断言，不声明同样会假绿。
+        inputs.file("src/main/java/io/legado/app/service/TTSReadAloudService.kt")
+                .withPropertyName("readAloudStartPreparedGuardSource")
+                .withPathSensitivity(PathSensitivity.RELATIVE)
         // 注：UpdateManagerAssetSelectionTest 调用的是**编好的** UpdateManager（非读源码文本），
         // class 字节本就是 Test 任务的输入，故无需在此声明。
     }

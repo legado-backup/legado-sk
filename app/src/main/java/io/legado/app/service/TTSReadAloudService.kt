@@ -752,6 +752,24 @@ class TTSReadAloudService : BaseReadAloudService() {
         // 重新开始朗读：取消退出时已排队的缓存清扫（否则几秒后把刚合成的章节删掉）
         ReadBook.book?.let(TtsCacheJanitor::cancelPending)
         if (contentList.isEmpty()) {
+            // ⚠️ 必须保留「空列表 → 推进下一章」：这是**章节边界续读**的恢复机制，
+            // 读到章尾、或本章本身无可读内容（纯图片章等）时都靠它往下走。
+            // 删掉/改宽会让朗读卡死在章末与章首之间。
+            //
+            // 但空列表另有一种含义：**本次起点还没准备落地**，此时连章节身份都还没有
+            // （currentChapterIndex == -1）。此时推进下一章是错的——没有"当前章"可推，
+            // switchReadAloudChapterKeepingViewByOffset 会报
+            // "Detached read aloud chapter is missing" 并 stopSelf()，表现就是
+            // 「完全退出后第一次点朗读立刻停止，第二次正常」（真机 5 轮复现 4 次）。
+            // 成因是纯时序：TTS 引擎热态（MultiTTS 常驻）时 onTtsInit 只需几十毫秒，
+            // 早于 newReadAloud 在 IO 上的章节准备。
+            //
+            // 判据只取「有没有章节身份」：正常章界续读时 currentChapterIndex 必然 >= 0，
+            // 因此这条早退对章界续读零影响。准备落地后确认块会再调一次 play()。
+            if (currentChapterIndex < 0) {
+                AppLog.putDebug("Read aloud start not prepared yet, waiting")
+                return
+            }
             AppLog.putDebug("Read aloud content list is empty")
             nextChapter()
             return
