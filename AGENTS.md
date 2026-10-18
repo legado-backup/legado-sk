@@ -387,15 +387,17 @@ uiautomator2 / ADB
 
 ---
 
-- ✅ **10103（`3.26.101905c`）—— 当前交付，未发布**（修复冷启动后第一次点朗读被立刻停掉）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `b501fd49`（守卫 + 回归锁 + 该 `.kt` 声明为 Test 输入）、本节（文档基线）。
-  - **现象**（作者）：「完全退出后的第一次进听书朗读都会打开后立刻退出（相当于停止朗读），再次点又正常」；**只在手机复现，平板与模拟器都不复现**。真机 Redmi `marble`／Android 13 **5 轮 4 次失败**。
-  - **根因（纯时序竞态，非状态机缺陷）**：`TTSReadAloudService.onTtsInit()` 在 TTS 初始化成功回调里直接 `play()`。引擎**热态**（MultiTTS 常驻）时该回调只需几十毫秒，**早于** `newReadAloud` 在 IO 上的章节准备落地。此刻 `contentList` 空 **且** `currentChapterIndex == -1`，`play()` 把「还没开始」当「本章读完」→ `nextChapter()` → `switchReadAloudChapterKeepingViewByOffset(-1)` → `Detached read aloud chapter is missing` → `stopSelf()`。平板/模拟器 TTS 冷启动更慢，章节准备先落地，**天然躲开该窗口**——这类竞态不能靠模拟器回归证伪。
+- ✅ **10103（`3.26.101905c`）—— 当前交付，✅ 已发布 Pre-release `v3.26.101905-10103`（2026-10-18）**（修复冷启动后第一次点朗读被立刻停掉；一并包含未单独发布的 10100/10101/10102）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `b501fd49`（守卫 + 回归锁 + 该 `.kt` 声明为 Test 输入）、`962b2aec`（文档基线）。
+  - **现象**：作者报「完全退出后的第一次进听书朗读都会打开后立刻退出（相当于停止朗读），再次点又正常」；**只在手机复现**，平板/模拟器不复现。真机 Redmi `marble`／Android 13 **5 轮 4 次失败**。
+  - **根因（纯时序竞态）**：`onTtsInit()` 在 TTS 成功回调里直接 `play()`；引擎热态（MultiTTS 常驻）时只需几十毫秒，**早于** `newReadAloud` 在 IO 上的章节准备。此刻 `contentList` 空 **且** `currentChapterIndex == -1`，`play()` 把「还没开始」当「本章读完」→ `nextChapter()` → `switchReadAloudChapterKeepingViewByOffset(-1)` → `Detached read aloud chapter is missing` → `stopSelf()`。模拟器/平板 TTS 冷启动更慢，章节准备先落地，**天然躲开该窗口**。
   - **修法（只收窄判据）**：`contentList.isEmpty()` 分支内，`currentChapterIndex < 0` 时早退（等确认块再 `play()`），否则照旧 `nextChapter()`。
-  - ⚠️ **绝对不变量**：**`contentList` 空 → `nextChapter()` 必须保留**。它是**章节边界续读**的恢复机制（读到章尾、纯图片章都靠它），删掉/改宽会让朗读卡死在章末/章首——作者明确要求「要保证顺畅朗读」。判据只能取 `currentChapterIndex`：切章路径 `switchReadAloudChapterKeepingView` **不设**起点令牌，按令牌早退会静默吞掉跨章推进。
-  - **验证**：单测 **305 项 / 10 失败**（＝既有基线，无新增）；`ReadAloudStartPreparedGuardTest` 3 项全绿，**双向证伪**：守卫改 `if (false)` ⇒ 2/3 RED。**e2e**（`emulator-5554`，10102→10103 覆盖升级）：① 冷启动首点朗读服务存活、`confirmed:true`、无 `Detached`/`onDestroy`；② **章界续读回归**：进度拖到章末最后一页再朗读 ⇒ `朗读结束跳转下一章并朗读` → 正常进下一章第 1 句。
-  - ⚠️ **真机 5 轮验证未完成**：手机已覆盖升级到 10103，但脚本末尾连续返回键把屏幕关掉，那批 5 轮结果**无效**；之后手机锁屏息屏，`input`/`swipe`/`wm dismiss-keyguard` 都解不开（需密码或指纹）。**待作者自测确认。**
-  - **产物**：正式版 36,181,433 B ＋ 共存版 36,181,107 B；均 `10103` / `3.26.101905c` / 阅读SK / arm64-v8a / 8 dex / apksigner 退出码 0。已在 `release/`（3 文件约定）。
+  - ⚠️ **绝对不变量**：**`contentList` 空 → `nextChapter()` 必须保留**——它是**章节边界续读**的恢复机制，删掉/改宽会让朗读卡死在章末/章首（作者明确要求「要保证顺畅朗读」）。判据只能取 `currentChapterIndex`：切章路径 `switchReadAloudChapterKeepingView` **不设**起点令牌，按令牌早退会静默吞掉跨章推进。
+  - **验证**：单测 **305 项 / 10 失败**（＝既有基线，无新增）；`ReadAloudStartPreparedGuardTest` 3 项全绿，**双向证伪**：守卫改 `if (false)` ⇒ 2/3 RED。
+  - **e2e（`emulator-5554`，10102→10103 覆盖升级）**：① **5 轮冷启动首点朗读全过**，其中 **cycle1 真实命中竞态**（日志 `Read aloud start not prepared yet, waiting` → 随后 `章节准备`），守卫按设计接住；② **章界续读回归**：拖到章末 25/25 再朗读 ⇒ `朗读结束跳转下一章并朗读` → `章节准备 ch:28` → 进下一章第 1 句；③ 听书中重进阅读页连续 3 轮无 FATAL；④ 冷启日志 `TTS 缓存清扫 … 删除 1 章，回收 10MB`（10100/10102 项仍生效）。
+  - ⚠️ **真机 5 轮验证仍未做**：手机已覆盖升级到 10103，但脚本末尾连续返回键把屏幕关掉，那批结果**无效**；之后手机锁屏息屏，`input`/`swipe`/`wm dismiss-keyguard` 都解不开（需密码或指纹）。**待作者自测。**
+  - **产物**：正式版 36,181,433 B ＋ 共存版 36,181,107 B；均 `10103` / `3.26.101905c` / 阅读SK / arm64-v8a / 8 dex / apksigner 退出码 0。Release 两资产成对上传（`…_arm64-v8a.apk` ＋ `…_arm64-v8a_sk2-coexist.apk`），target `main`，Pre-release。
+  - **发布说明只写两条用户可见结论**（作者要求）：① 自动清理视频/音频缓存，避免占用存储过大；② 修复听书过程中重新进入阅读界面的崩溃问题。**根因与验证细节只留在 `发布版更新记录.md`，不写进 Release 正文。**
 
 - ✅ **10102（`3.26.101720c`）—— 历史交付，未发布**（TTS 音频缓存加容量治理）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `e71e8042`（清扫 + 纯函数 + 单测）、`8840c0e1`（两处 e2e 抓出的实质缺陷）、`ece3e93a`（日志单位）、本节（文档基线）。
