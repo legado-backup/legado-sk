@@ -55,7 +55,9 @@ import io.legado.app.help.rhino.NativeBaseSource
 import io.legado.app.help.source.SourceHelp
 import io.legado.app.help.storage.Backup
 import io.legado.app.help.storage.RestoreJournal
+import io.legado.app.help.tts.TtsCacheJanitor
 import io.legado.app.model.BookCover
+import io.legado.app.model.ReadBook
 import io.legado.app.plugin.AppPlugins
 import io.legado.app.utils.ChineseUtils
 import io.legado.app.utils.LogUtils
@@ -124,6 +126,8 @@ class App : Application() {
             BookHelp.clearInvalidCache()
             // 媒体流缓存全局兜底：回收上次进程被杀/异常退出留下的播放缓存
             MediaStreamCacheJanitor.enforceBudget()
+            // TTS 音频缓存兜底：只留当前章，回收进程被杀留下的 wav
+            TtsCacheJanitor.enforceOnStartup(ReadBook.book)
             Backup.clearCache()
             ReadBookConfig.clearBgAndCache()
 //            ThemeConfig.clearBg() //每次手动切换主题时清理多余图片

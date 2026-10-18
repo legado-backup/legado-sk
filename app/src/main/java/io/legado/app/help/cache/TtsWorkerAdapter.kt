@@ -134,6 +134,10 @@ internal object CacheTtsWorkerRegistry {
 
     fun hasCoordinatorTasks(): Boolean = bindings.isNotEmpty()
 
+    /** 该书是否有进行中的批量 TTS 任务（清扫侧据此跳过，避免删掉正在合成的章节）。 */
+    fun isBookActive(bookUrl: String): Boolean =
+        synchronized(lock) { bindings.values.any { it.bookUrl == bookUrl } }
+
     /** 同一本书同一时刻只允许一个 TTS 任务持有章节（book 级去重）。 */
     fun register(
         task: CacheTaskState,

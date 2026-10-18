@@ -221,6 +221,8 @@ internal object TtsCacheManager {
                     // 3. 逐单元合成
                     val success = synthesizeChapter(task, contentList, trace)
                     if (success) {
+                        // 成章标记：用户主动预缓存的章不被退出清扫删除
+                        TtsCacheJanitor.markBatchCached(book, chapter)
                         trace.done(CacheOperationDiagnostics.Metrics(unitCount = contentList.size))
                     } else {
                         trace.fail(IllegalStateException("one or more tts units failed"))

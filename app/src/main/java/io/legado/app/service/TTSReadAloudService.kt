@@ -24,6 +24,7 @@ import io.legado.app.exception.NoStackTraceException
 import io.legado.app.help.MediaHelp
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.exoplayer.VolumeGainRenderersFactory
+import io.legado.app.help.tts.TtsCacheJanitor
 import io.legado.app.help.tts.TtsCacheLog
 import io.legado.app.help.tts.TtsCacheStore
 import io.legado.app.lib.dialogs.SelectItem
@@ -136,6 +137,18 @@ class TTSReadAloudService : BaseReadAloudService() {
     }
 
     override fun onDestroy() {
+        // 退出清扫：只留当前章，其余 tts_cache 章节目录全删（批量预缓存章豁免）。
+        // 必须在 super.onDestroy() 之前取状态——基类会清 runningClass / progress。
+        runCatching {
+            val book = ReadBook.book
+            val chapter = textChapter?.chapter
+            if (book != null && chapter != null) {
+                TtsCacheJanitor.onAloudStopped(
+                    book,
+                    setOf(TtsCacheStore.chapterStem(chapter)),
+                )
+            }
+        }.onFailure { AppLog.put("TTS 缓存清扫登记失败: ${it.localizedMessage}", it) }
         super.onDestroy()
         clearTTS(forgetVoice = true)
         runCatching { wavPlayer.release() }
@@ -730,6 +743,8 @@ class TTSReadAloudService : BaseReadAloudService() {
     override fun play() {
         if (!ttsInitFinish) return
         if (!requestFocus()) return
+        // 重新开始朗读：取消退出时已排队的缓存清扫（否则几秒后把刚合成的章节删掉）
+        ReadBook.book?.let(TtsCacheJanitor::cancelPending)
         if (contentList.isEmpty()) {
             AppLog.putDebug("Read aloud content list is empty")
             nextChapter()

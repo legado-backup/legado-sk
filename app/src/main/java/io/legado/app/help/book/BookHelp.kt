@@ -466,6 +466,7 @@ object BookHelp {
         delContent(book, bookChapter)
         io.legado.app.help.review.ReviewSnapshotStore.deleteChapter(book, bookChapter)
         io.legado.app.help.tts.TtsCacheStore.deleteChapter(book, bookChapter)
+        io.legado.app.help.tts.TtsCacheJanitor.clearBatchMark(book, bookChapter)
     }
 
     private fun delChapterImages(book: Book, bookChapter: BookChapter) {
