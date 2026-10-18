@@ -290,6 +290,11 @@ Activity 页面标题和正文标题不是“弹窗头”，不得为追求无�
   - **作者选择方案 A「不动存量」**：旧名目录存在即跳过，**既不新建也不改名**；存量设备继续显示旧名，只有全新安装才显示新名。
   - ⚠️ **`白`/`黑` 预设 `backgroundImgPath` 本来就是 `None`（纯色预设），`bg=None` 不是空壳判据**；判别空壳要看 `primaryColor` 是否为预设真值（`#ffecebe9`/`#ff333333`），带背景的是 `MD3·墨墟`/`MD3·琴女`（`background.jpg`）。
 
+- **禁止缓存 `viewTreeObserver` 局部引用后自行移除监听（10101 确立，主线程崩溃级）**：`View.getViewTreeObserver()` 在 View **尚未 attach** 时返回的是 View 内部的临时 `mFloatingTreeObserver`；attach 时 `View.dispatchAttachedToWindow` 调 `info.mTreeObserver.merge(mFloatingTreeObserver)` 把监听**搬进真实 observer 并 `kill()` 掉这份临时对象**（`mAlive=false`）。监听仍会被派发，但回调里对**缓存的旧引用**调 `removeOnGlobalLayoutListener` / `removeOnPreDrawListener` 会先过 `checkIsAlive()` → `IllegalStateException: This ViewTreeObserver is not alive`，主线程 FATAL。
+  - 正确写法三选一：① 每次从 View 现取（`view.viewTreeObserver.add/remove`）；② 移除前查 `isAlive()`（本仓库范例 `AnimationExtensions.doAfterFirstDraw`）；③ 直接用 androidx `doOnLayout` / `doOnPreDraw`（`OneShotPreDrawListener` 内部已含 `isAlive()` 回退，且 detach 时自动移除）。
+  - ⚠️ **在 `onCreate` / `onViewCreated` 里注册布局回调是最高危场景**：此时控件必然未 attach。10024 的「朗读面板定位就绪才显示」重放时踩中此坑，10095~10100 期间「听书状态重进阅读页」必崩。
+  - 回归锁：`ReadAloudPanelPositionGuardTest.panelsArePositionedBeforeRevealed` 含**反向断言**，禁止该函数体内再出现 `viewTreeObserver` / `removeOnGlobalLayoutListener`。
+
 - **阅读排版预设按数组下标寻址**：`DefaultData.readConfigs` 由 `ReadBookConfig.getConfig(index)` 直接取用，`readStyleSelect` 是 **Int**。**只允许在数组末尾追加**，改名安全但要同步 `BuiltinPresetAssetTest.READ_PRESET_HEAD`；插入/重排会让存量用户当前排版整体位移。唯一比较预设**名字**的地方是 `ReadBookConfig.kt` 的 `isOldFormatConfigList`（旧格式迁移），改名经实跑验证不影响其布尔结果（下标 0 先命中 `||` 短路）。
 - **语言裁剪边界**：`resConfigs "zh"` **会裁掉同语言 region 变体**（`zh-rHK`/`zh-rTW` 与繁体、其他语言一样被裁，只保留精确 `zh`）。产物实测 `locales: '--_--' 'zh'`、`unzip` 中 HK/TW 计数为 0，故 `values-zh-rHK|rTW` 是**不进 APK 的死资源**（已于 10038 删除），不存在"HK/TW 回退到简体或英文"的情形。详见 §6 的语言裁剪边界注。
 - **备份打包清单的两类路径（10044 确立、10045 补强，改动前必读）**：给 `ZipUtils.zipFile` 的路径分两类——「本次流程自己创建/校验的」可直接传，「依赖用户配置才存在的」必须先 `exists()` 过滤。⚠️ 但**过滤时点**同样关键：由本次流程**稍后**才创建的目录（如 `covers`，`prepareCustomCoverBackup()` 才建）**不能放进 `backgroundAssetDirNames` 交给存在性判定**，否则会被提前跳过 → 数据静默漏备份（10045 修）。正确做法：先让创建者建好目录并补齐内容，**再按"目录里实际有什么"判定**（`coverDirShouldBeZipped(File)` 判 `listFiles()` 非空）。⚠️ **判据必须锚定"最终要被打包的那个对象的状态"，不能锚定"本次流程做了什么动作"**——`prepareCustomCoverBackup()` 对**已在该目录内**的封面会跳过拷贝，用"本次拷了几个"判定会把最常见的场景误判为空（10045 首版实现即犯此错，被实机回归抓到）。
@@ -378,27 +383,28 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10099` 递增**。
+> **下一次交付 versionCode 从 `10102` 递增**。
 
 ---
 
-- ✅ **10098（`3.26.101700c`）—— 当前交付，✅ 已发布 Pre-release `v3.26.101700-10098`（2026-10-17）**（修复备份按钮在全选时静默失效）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `56c28ee7`（三态决策 + 调用点修正 + 双回归锁）、`6c77be68`（文档基线）。
-  - **① 修复「默认备份内容全选时点备份没有任何反应」**：
-    - **根因**：10073 起 `BackupConfigFragment.backup` 写成 `selectBackupTargets() ?: return@launch`，把共享入口 `BackupTargetConfig.selectedTargetsOrNull()` 的 **`null`＝「全选」** 误当「中止」⇒ **未动过该设置的用户（默认全选）点「备份」毫无反应**：无进度框、无 toast、无文件。详见 §4「备份范围决策」条。
-    - **修法**：新增 `BackupScopeDecision` + 纯函数 `decideBackupScope()`，把「全选」与「中止」拆成互斥分支；调用点改 by-decision 收口。`selectedTargetsOrNull()` 未改（自动备份侧 null＝全打包是**正确**的）。
-    - **回归锁** `BackupScopeDecisionTest`（3 项，**直接调真实纯函数**）。
-  - **验证**：两变体各跑全量单测均 **293 项 / 10 失败**（＝既有基线，无新增）。**双向证伪**：① `null→Abort` ⇒ 1/3 RED；② 调用点整体退回 10073 形态 ⇒ 2/7 RED。
-  - **模拟器 e2e**：**先在 10097 上复现**（`backupUri` 已写入证明确实进入 `backup(path)`，但 zip md5 不变、无 toast、无日志）→ 装 10098 后三例全过：**全选**＝`开始备份` + zip 32,462 B + 「备份成功」；**空一项**＝成功且该目标不在包内；**全不勾**＝toast「未选择任何备份内容…」且不备份。
-  - **真机**：手机 `72a2b362`（10095→10098）与平板 `HA1KAPWG`（10094→10098）均以 `_（共存版）.apk` 覆盖升级，`firstInstallTime` 未变，启动无崩溃。
-  - **产物**：正式版 36,172,514 B ＋ 共存版 36,172,187 B；均 `10098` / `3.26.101700c` / 阅读SK / arm64-v8a / 8 dex / apksigner exit 0。已在 `release/`（3 文件约定），也是 Release 资产。
-  - ⚠️ **`apksigner.bat` 吃不了含中文的路径**（`FileNotFoundException`，文件名被截断）：核验共存版签名须先复制成纯 ASCII 名。
+- ✅ **10101（`3.26.101808c`）—— 当前交付，未发布**（修复听书状态下重进阅读页必崩）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `11a5a331`（修法 + 反向回归锁）、本节（文档基线）。
+  - **① 修复「从听书状态进入阅读页主线程必崩」**：
+    - **现象**：实机 10100 两次必崩（10-17 20:13、10-18 07:55），`IllegalStateException: This ViewTreeObserver is not alive, call getViewTreeObserver() again`，主线程 FATAL，落在 `ReadBookActivity.kt:2149 removeOnGlobalLayoutListener`。用户主观感受是「只是听书，莫名其妙就崩了」——因为听书在后台继续、用户以为没操作。
+    - **根因**：`positionAndRevealReadAloudPanel` 在页脚未就绪时把 `binding.readView.viewTreeObserver` 存进局部 `val viewTree` 再注册监听。`onCreate` 阶段 `readView` 尚未 attach，`View.getViewTreeObserver()` 返回的是 View 内部的临时 `mFloatingTreeObserver`；attach 时 `View.dispatchAttachedToWindow` 调 `info.mTreeObserver.merge(mFloatingTreeObserver)` **把监听搬进真实 observer 并 `kill()` 掉这份临时对象**（`mAlive=false`）。监听照常派发，但回调对**缓存的旧引用**调 `removeOnGlobalLayoutListener` 会先过 `checkIsAlive()` → 必抛。监听根本不该在这条路径上被缓存。
+    - **修法**：改用 `androidx.core.view.doOnPreDraw`（`OneShotPreDrawListener`）——它每次从 View 现取 observer，`removeListener()` 内已有 `mViewTreeObserver.isAlive()` 回退分支，且视图 detach 时自动移除。单次预绘制语义与原「下一次布局」等价，先定位后显示的正确性不变。
+    - ⚠️ **红线**：**任何 `viewTreeObserver` 都不要缓存到局部再自行移除监听**。要么每次从 View 现取，要么查 `isAlive()`（本仓库正确范例见 `AnimationExtensions.doAfterFirstDraw`），要么直接用 androidx 的 `doOnLayout` / `doOnPreDraw`。attach 前的 floating observer 被 merge+kill 是 AOSP 设计行为，不是可用旧引用。
+    - **回归锁**：`ReadAloudPanelPositionGuardTest` 增加**反向断言**，禁止该函数体内再出现 `viewTreeObserver` / `removeOnGlobalLayoutListener`——只改正向断言的话，退回旧写法仍能全绿。
+  - **验证**：单测 297 项 / 10 失败（＝既有基线：`CacheTaskStoreTest` 9 + `ReadBookConfigTest` 1，无新增）。**双向证伪**：退回旧写法 ⇒ `panelsArePositionedBeforeRevealed` RED。
+  - **真机 e2e**（平板 `HA1KAPWG`，10100→10101 覆盖升级，`firstInstallTime` 未变）：听书运行中退出阅读页 → 从书架重进 ⇒ `ReadBookActivity onCreate` 后**进程存活**（PID 不变、无 FATAL），且面板定位正确 `topOnScreen=2408 bottomOnScreen=2560`（对齐页脚，非贴屏底）。崩溃当时同路径日志形态一致。
+  - **产物**：正式版 36,178,774 B ＋ 共存版 36,178,426 B；均 `10101` / `3.26.101808c` / 阅读SK / arm64-v8a / 8 dex / apksigner exit 0。已在 `release/`（3 文件约定）。
+  - ⚠️ **提交时 `core.autocrlf=true` 会把 `git diff --stat` 显示成整文件重写**（本例 `+4163/−4148`），但 blob 实为 LF、真实 diff 仅 19 行（`git diff HEAD~1 HEAD --stat` 复核）。判断提交是否失控要看 blob，不要被 `git add` 后的 diffstat 吓到。
+
+- ✅ **10098（`3.26.101700c`）——历史交付，✅ 已发布 Pre-release `v3.26.101700-10098`（2026-10-17）**（修复备份按钮在全选时静默失效）：详见 `companion/发布版更新记录.md` §1 的 10098 节。**红线**：`null`＝「全选」，不得再兼作「中止」，详见 §4「备份范围决策」条。⚠️ `apksigner.bat` 吃不了含中文的路径，核验共存版签名须先复制成纯 ASCII 名。
 
 - ✅ **10097（`3.26.101615c`）——历史交付，✅ 已发布 Pre-release（2026-10-16）**（修复共存版检查更新只会下到正式包）：详见 `companion/发布版更新记录.md` §1 的 10097 节。
 
-- ✅ **10096（`3.26.101625c`）——历史交付，✅ 已发布 Pre-release（2026-10-16）**（修复双击跳段/从本页听多跳段落 + 听书底部面板贴屏底）：详见 `companion/发布版更新记录.md` §1 的 10096 节。
-
-<!-- §6 仅保留最近 3 条交付；10094 / 10089 / 10086 / 10081 / 10076 及更早的逐版净增量见 companion/发布版更新记录.md §1。 -->
+<!-- §6 仅保留最近 3 条交付；10096 / 10094 / 10089 / 10086 / 10081 / 10076 及更早的逐版净增量见 companion/发布版更新记录.md §1。 -->
 
 ## 7. 当前机器环境与配套文档（2026-09-04 迁移后）
 
