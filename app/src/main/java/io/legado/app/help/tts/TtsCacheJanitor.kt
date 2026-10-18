@@ -122,9 +122,16 @@ object TtsCacheJanitor {
                 AppLog.put("TTS 缓存章节目录删除失败: ${dir.absolutePath}")
             }
         }
+        // 小于 1MB 时用 MB 整数截断会显示「回收 0MB」，把真实回收量藏掉
+        // （排查时被这行误导过）。按量级选单位。
+        val freedText = if (plan.freedBytes >= 1024L * 1024L) {
+            "${plan.freedBytes / (1024L * 1024L)}MB"
+        } else {
+            "${plan.freedBytes / 1024L}KB"
+        }
         AppLog.put(
             "TTS 缓存清扫 ${book.name}：删除 ${plan.deleteStems.size} 章" +
-                "，回收 ${plan.freedBytes / 1024 / 1024}MB"
+                "，回收 $freedText"
         )
     }
 
