@@ -383,22 +383,26 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10102` 递增**。
+> **下一次交付 versionCode 从 `10103` 递增**。
 
 ---
 
-- ✅ **10101（`3.26.101808c`）—— 当前交付，未发布**（修复听书状态下重进阅读页必崩）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `11a5a331`（修法 + 反向回归锁）、本节（文档基线）。
-  - **① 修复「从听书状态进入阅读页主线程必崩」**：
-    - **现象**：实机 10100 两次必崩（10-17 20:13、10-18 07:55），`IllegalStateException: This ViewTreeObserver is not alive, call getViewTreeObserver() again`，主线程 FATAL，落在 `ReadBookActivity.kt:2149 removeOnGlobalLayoutListener`。用户主观感受是「只是听书，莫名其妙就崩了」——因为听书在后台继续、用户以为没操作。
-    - **根因**：`positionAndRevealReadAloudPanel` 在页脚未就绪时把 `binding.readView.viewTreeObserver` 存进局部 `val viewTree` 再注册监听。`onCreate` 阶段 `readView` 尚未 attach，`View.getViewTreeObserver()` 返回的是 View 内部的临时 `mFloatingTreeObserver`；attach 时 `View.dispatchAttachedToWindow` 调 `info.mTreeObserver.merge(mFloatingTreeObserver)` **把监听搬进真实 observer 并 `kill()` 掉这份临时对象**（`mAlive=false`）。监听照常派发，但回调对**缓存的旧引用**调 `removeOnGlobalLayoutListener` 会先过 `checkIsAlive()` → 必抛。监听根本不该在这条路径上被缓存。
-    - **修法**：改用 `androidx.core.view.doOnPreDraw`（`OneShotPreDrawListener`）——它每次从 View 现取 observer，`removeListener()` 内已有 `mViewTreeObserver.isAlive()` 回退分支，且视图 detach 时自动移除。单次预绘制语义与原「下一次布局」等价，先定位后显示的正确性不变。
-    - ⚠️ **红线**：**任何 `viewTreeObserver` 都不要缓存到局部再自行移除监听**。要么每次从 View 现取，要么查 `isAlive()`（本仓库正确范例见 `AnimationExtensions.doAfterFirstDraw`），要么直接用 androidx 的 `doOnLayout` / `doOnPreDraw`。attach 前的 floating observer 被 merge+kill 是 AOSP 设计行为，不是可用旧引用。
-    - **回归锁**：`ReadAloudPanelPositionGuardTest` 增加**反向断言**，禁止该函数体内再出现 `viewTreeObserver` / `removeOnGlobalLayoutListener`——只改正向断言的话，退回旧写法仍能全绿。
-  - **验证**：单测 297 项 / 10 失败（＝既有基线：`CacheTaskStoreTest` 9 + `ReadBookConfigTest` 1，无新增）。**双向证伪**：退回旧写法 ⇒ `panelsArePositionedBeforeRevealed` RED。
-  - **真机 e2e**（平板 `HA1KAPWG`，10100→10101 覆盖升级，`firstInstallTime` 未变）：听书运行中退出阅读页 → 从书架重进 ⇒ `ReadBookActivity onCreate` 后**进程存活**（PID 不变、无 FATAL），且面板定位正确 `topOnScreen=2408 bottomOnScreen=2560`（对齐页脚，非贴屏底）。崩溃当时同路径日志形态一致。
-  - **产物**：正式版 36,178,774 B ＋ 共存版 36,178,426 B；均 `10101` / `3.26.101808c` / 阅读SK / arm64-v8a / 8 dex / apksigner exit 0。已在 `release/`（3 文件约定）。
-  - ⚠️ **提交时 `core.autocrlf=true` 会把 `git diff --stat` 显示成整文件重写**（本例 `+4163/−4148`），但 blob 实为 LF、真实 diff 仅 19 行（`git diff HEAD~1 HEAD --stat` 复核）。判断提交是否失控要看 blob，不要被 `git add` 后的 diffstat 吓到。
+- ✅ **10102（`3.26.101720c`）—— 当前交付，未发布**（TTS 音频缓存加容量治理）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `e71e8042`（清扫 + 纯函数 + 单测）、`8840c0e1`（两处 e2e 抓出的实质缺陷）、`ece3e93a`（日志单位）、本节（文档基线）。
+  - **① `tts_cache` 之前完全没有容量上限**：10100 的 200MB 预算只覆盖 `video_media` / `audio_media`。系统 TTS 实时缓存（`ttsWavMode` + `ttsRealtimeCache`）会把每个朗读单元的 wav 无上限写进 `book_cache/<书>/tts_cache/<章节>/`，该目录属 `externalFiles`，被系统计为**用户数据**而非缓存——与 10100 修掉的 video_media 同类，只是当时没覆盖到。用户主诉「主要听书」正是长期累积路径。
+  - **规则（作者选定）**：**只留当前章，其余全删**；但用户**主动批量预缓存**过的章必须豁免（那是他排队合成的产物，删了等于白做）。
+  - **实现**：`TtsCacheSweep.kt` = 纯决策函数 `planTtsCacheSweep`（不碰 `appCtx`，JVM 可测）；`TtsCacheJanitor.kt` = 唯一清扫入口，两个触发点（朗读服务销毁后延迟 8s / App 启动兜底）。删章为**章节目录整删**，不做单元级 LRU（章节是这套缓存唯一自然身份）。
+  - ⚠️ **批量预缓存标记放 `tts_cache_complete/<章节stem>/`（与 `tts_cache/` 同级）**，同 10100 的 `*_media_complete/` 约定。**刻意不放进章节目录内**：章节目录会被 `ExportBookService` 整目录扫描，标记文件会污染导出报告（变成「未映射缓存」）。
+  - ⚠️ **红线 1（启动清扫必须按持久化进度留章）**：`ReadBook.book` 是内存态，**冷启动必为 null**，用它判断当前章会让保留集退化成空集，把「上次听书的那一章」也当过期缓存删掉。只能取每本书自己的 `books.durChapterIndex`。回归锁 `emptyKeepDeletesAllUnmarked`。
+  - ⚠️ **红线 2（退出清扫必须用引擎章节身份，不要用 `textChapter`）**：`textChapter?.chapter` 在服务销毁流程中可能已被清空，导致清扫登记**静默不执行**（日志只有 `onDestroy`、没有清扫）。改用引擎私有光标 `currentChapterIndex`。
+  - ⚠️ **清扫会跳过正在批量合成的书**（`CacheTtsWorkerRegistry.isBookActive`）；按章删缓存时同步清标记（`BookHelp.delChapterCache` → `clearBatchMark`）。
+  - ⚠️ **日志单位按量级选**：`<1MB` 用 MB 整数截断会写「回收 0MB」，把真实回收量藏掉——本次排查就被它误导过一次。已改为 `>=1MB` 用 MB、否则 KB。
+  - **验证**：单测 302 项 / 10 失败（＝既有基线，无新增）。**双向证伪**：去掉 `batch` 判据 ⇒ `batchChaptersAreNeverDeleted` / `emptyKeepDeletesAllUnmarked` 双双 RED。
+  - **e2e**（`emulator-5554`，10101→10102 覆盖升级，`firstInstallTime` 未变）：注入无标记过期章 + 带标记章 → ① 启动清扫删过期的、留当前章与标记章（2428KB→1716KB，日志 `回收 700KB`）；② 真实听书 → 点悬浮面板「停止」⇒ `退出清扫登记 chapterIndex:25` → 8s 后 `清扫 删除 2 章`，过期章消失、当前章与标记章保留。
+  - **产物**：正式版 36,181,183 B ＋ 共存版 36,181,426 B；均 `10102` / `3.26.101720c` / 阅读SK / arm64-v8a / 8 dex / apksigner 无错误。已在 `release/`（3 文件约定）。
+  - ⚠️ **`assembleAppSk2` 单独重跑可能显示 `UP-TO-DATE` 而复用旧 APK**（本次踩到：sk2 时间戳比 release 早）。核对产物必须看 `LastWriteTime`，不能只看文件名；怀疑时先删 `app\build\outputs\apk\app\sk2\*.apk` 再编。
+
+- ✅ **10101（`3.26.101808c`）——历史交付，未发布**（修复听书状态下重进阅读页必崩）：详见 `companion/发布版更新记录.md` §1 的 10101 节。**红线**：禁止缓存 `viewTreeObserver` 局部引用后自行移除监听，详见 §4 同名条（含 AOSP `merge+kill` 根因与三种正确写法）。
 
 - ✅ **10098（`3.26.101700c`）——历史交付，✅ 已发布 Pre-release `v3.26.101700-10098`（2026-10-17）**（修复备份按钮在全选时静默失效）：详见 `companion/发布版更新记录.md` §1 的 10098 节。**红线**：`null`＝「全选」，不得再兼作「中止」，详见 §4「备份范围决策」条。⚠️ `apksigner.bat` 吃不了含中文的路径，核验共存版签名须先复制成纯 ASCII 名。
 
