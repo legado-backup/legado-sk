@@ -275,13 +275,10 @@ object ReadBookConfig {
         } else if (drawable is ColorDrawable) {
             bgMeanColor = drawable.color
         }
-        val tmp = bg
+        // bg 是跨 Activity 实例共享的静态 Drawable，旧图可能仍挂在某个已 onPause 但未
+        // onDestroy 的书页视图上（重建窗口首帧绘制即 use-after-free）。这里不回收旧位图，
+        // 交给 GC：Bitmap 自 Android 8 起在 native heap 由 GC 跟踪，无需手动 recycle。
         bg = drawable
-        if (tmp is BitmapDrawable) { //太快执行，可能还正在被使用，延时防崩溃
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                tmp.bitmap?.recycle()
-            }
-        }
     }
 
     fun save() {

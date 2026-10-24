@@ -261,6 +261,10 @@ android {
         inputs.file("src/main/java/io/legado/app/service/TTSReadAloudService.kt")
                 .withPropertyName("readAloudStartPreparedGuardSource")
                 .withPathSensitivity(PathSensitivity.RELATIVE)
+        // ReadBookBackgroundBitmapGuardTest 断言共享背景位图不得被回收，同为源码级静态断言。
+        inputs.file("src/main/java/io/legado/app/help/config/ReadBookConfig.kt")
+                .withPropertyName("readBookBackgroundBitmapGuardSource")
+                .withPathSensitivity(PathSensitivity.RELATIVE)
         // 注：UpdateManagerAssetSelectionTest 调用的是**编好的** UpdateManager（非读源码文本），
         // class 字节本就是 Test 任务的输入，故无需在此声明。
     }
