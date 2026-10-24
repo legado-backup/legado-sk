@@ -383,11 +383,22 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10104` 递增**。
+> **下一次交付 versionCode 从 `10105` 递增**。
 
 ---
 
-- ✅ **10103（`3.26.101905c`）—— 当前交付，✅ 已发布 Pre-release `v3.26.101905-10103`（2026-10-18）**（修复冷启动后第一次点朗读被立刻停掉；一并包含未单独发布的 10100/10101/10102）：
+- ✅ **10104（`3.26.102420c`）—— 当前交付，未发布**（修复阅读页重建首帧「背景位图已被回收」崩溃）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `d1ab3532`（修复 + 回归锁 + 该 `.kt` 声明为 Test 输入）。
+  - **现象**：平板 TB-9707F／Android 13（共存版 `sk2`，10103）**10-23 12:15:01** 与 **10-24 12:09:37** 各崩一次，栈完全相同 —— `Canvas: trying to use a recycled bitmap` → `BitmapDrawable.draw` → `LayerDrawable.draw` → `View.drawBackground` → `ReadView.dispatchDraw(ReadView.kt:314)`。
+  - **触发时序**（app 自己的 `cache/logs/appLog-*` 逐行对齐）：阅读页 `onPause` → `BookTocLoadingActivity`／`BookInfoActivity` 走一遍 → **同一个 ReadBookActivity 新实例 `onCreate`/`onResume`（旧实例全程未 `onDestroy`）** → 新 `ReadView.init`/`onSizeChanged` 调 `ReadBookConfig.upBg()` → **72 ms 后首帧绘制即 FATAL**。
+  - **根因**：`ReadBookConfig.bg` 是**跨 Activity 实例共享的静态 Drawable**，`upBg()` 换图时把上一张位图 `post { recycle() }`。旧窗口仍把**同一个 Drawable** 挂在 `PageView.vwRoot` 背景的 `LayerDrawable` 里 → 新实例重建背景 = 对旧窗口的 use-after-free。原注释「太快执行，可能还正在被使用，延时防崩溃」只考虑同一实例内同步替换，`post` 只是把崩溃推迟一个消息。
+  - **修法**：删掉那次手动 `recycle()`，`bg = drawable` 后交给 GC（Bitmap 自 Android 8 起在 native heap 由 GC 跟踪，无需手动回收）。
+  - ⚠️ **不要"优化"回手动 recycle**：只要还有任一视图引用该共享 Drawable，程序就无权回收。回归锁 `ReadBookBackgroundBitmapGuardTest`（源码级静态断言，`upBg` 函数体内出现 `recycle()` 即 RED；**双向证伪**：注入 `drawable.bitmap?.recycle()` ⇒ RED）。
+  - **验证**：单测 **306 项 / 10 失败**（＝既有基线，无新增）；新守卫 1 项全绿。**e2e（`emulator-5554`，10103→10104 覆盖升级，`firstInstallTime` 仍 2026-09-21）**：① 重进阅读页 **10 轮 + 12 轮**；② 睡眠/唤醒 **8 轮**；③ 旋转 **8 轮**；④ 系统日夜切换 **6 轮**；⑤ 菜单切主题＋旋转＋重进交错 **25 轮 ×2（10103 与 10104 各一轮）**；⑥ 连换背景图 **6 轮**（PSS 从 260 MB **降到** 249 MB 后稳定，无单调增长）。全程 `crash` buffer 无 FATAL、进程存活。
+  - ⚠️ **模拟器上复现不出原崩溃**（10103 在模拟器同样跑完上述压力脚本未崩）：模拟器窗口/绘制时序比真机快，旧窗口在那 1 帧内已完成绘制。**修复依据是根因与栈，不是模拟器复现**；真机侧待作者验证。
+  - **产物**：正式版 36,180,918 B ＋ 共存版 36,180,817 B；均 `10104` / `3.26.102420c` / 阅读SK / arm64-v8a / apksigner 无错误。已在 `release/`（3 文件约定）。
+
+- ✅ **10103（`3.26.101905c`）—— 历史交付，已发布 Pre-release `v3.26.101905-10103`（2026-10-18）**（修复冷启动后第一次点朗读被立刻停掉；一并包含未单独发布的 10100/10101/10102）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `b501fd49`（守卫 + 回归锁 + 该 `.kt` 声明为 Test 输入）、`962b2aec`（文档基线）。
   - **现象**：作者报「完全退出后的第一次进听书朗读都会打开后立刻退出（相当于停止朗读），再次点又正常」；**只在手机复现**，平板/模拟器不复现。真机 Redmi `marble`／Android 13 **5 轮 4 次失败**。
   - **根因（纯时序竞态）**：`onTtsInit()` 在 TTS 成功回调里直接 `play()`；引擎热态（MultiTTS 常驻）时只需几十毫秒，**早于** `newReadAloud` 在 IO 上的章节准备。此刻 `contentList` 空 **且** `currentChapterIndex == -1`，`play()` 把「还没开始」当「本章读完」→ `nextChapter()` → `switchReadAloudChapterKeepingViewByOffset(-1)` → `Detached read aloud chapter is missing` → `stopSelf()`。模拟器/平板 TTS 冷启动更慢，章节准备先落地，**天然躲开该窗口**。
@@ -414,9 +425,7 @@ uiautomator2 / ADB
   - **产物**：正式版 36,181,183 B ＋ 共存版 36,181,426 B；均 `10102` / `3.26.101720c` / 阅读SK / arm64-v8a / 8 dex / apksigner 无错误。已在 `release/`（3 文件约定）。
   - ⚠️ **`assembleAppSk2` 单独重跑可能显示 `UP-TO-DATE` 而复用旧 APK**（本次踩到：sk2 时间戳比 release 早）。核对产物必须看 `LastWriteTime`，不能只看文件名；怀疑时先删 `app\build\outputs\apk\app\sk2\*.apk` 再编。
 
-- ✅ **10101（`3.26.101808c`）——历史交付，未发布**（修复听书状态下重进阅读页必崩）：详见 `companion/发布版更新记录.md` §1 的 10101 节。**红线**：禁止缓存 `viewTreeObserver` 局部引用后自行移除监听，详见 §4 同名条（含 AOSP `merge+kill` 根因与三种正确写法）。
-
-<!-- §6 仅保留最近 3 条交付；10098 / 10097 / 10096 / 10094 / 10089 / 10086 / 10081 / 10076 及更早的逐版净增量见 companion/发布版更新记录.md §1。 -->
+<!-- §6 仅保留最近 3 条交付；10101 / 10098 / 10097 / 10096 / 10094 / 10089 / 10086 / 10081 / 10076 及更早的逐版净增量见 companion/发布版更新记录.md §1。 -->
 
 ## 7. 当前机器环境与配套文档（2026-09-04 迁移后）
 
