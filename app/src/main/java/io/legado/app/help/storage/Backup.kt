@@ -99,6 +99,19 @@ internal fun navigationBarDirNameStaysInSync(): Boolean {
 }
 
 /**
+ * 云端最近一次备份是否仍落在 24 小时窗口内。
+ *
+ * 判据只看**服务端返回的最后修改时间**（＝上传时刻），**不区分设备**：
+ * 平板在 24 小时内备份过，手机就不应再传一份自己的。
+ * `lastModify` 为 0 表示服务器没给出时间（或没有备份），按"没有"处理。
+ *
+ * 独立成顶层函数以便 JVM 单测直接覆盖（[Backup] 初始化会触碰 `appCtx`）。
+ */
+internal fun isCloudBackupWithinOneDay(lastModify: Long, now: Long): Boolean {
+    return lastModify + TimeUnit.DAYS.toMillis(1) > now
+}
+
+/**
  * 备份
  */
 object Backup {
@@ -215,11 +228,34 @@ object Backup {
         return lastBackup + TimeUnit.DAYS.toMillis(1) < System.currentTimeMillis()
     }
 
+    /**
+     * 「一天一次」的自动备份。
+     *
+     * 闸门分两层：
+     * 1. 本机上次备份（[LocalConfig.lastBackup]）是否已满 24 小时 —— 纯本地、无网络；
+     * 2. 云端**任一设备**最近一次备份是否在 24 小时内（[AppWebDav.lastBackUp]）。
+     *    命中则本机不再上传，并把 `lastBackup` 记账到那次云端备份的时间，
+     *    使窗口按云端事实推进，且避免每次退出都重复查询。
+     */
     fun autoBack(context: Context) {
         if (shouldBackup()) {
             Coroutine.async {
                 mutex.withLock {
                     if (shouldBackup()) {
+                        val latestCloudBackup = AppWebDav.lastBackUp()
+                            .onFailure {
+                                AppLog.put("读取云端最近备份失败\n${it.localizedMessage}", it)
+                            }
+                            .getOrNull()
+                        val now = System.currentTimeMillis()
+                        if (latestCloudBackup != null &&
+                            isCloudBackupWithinOneDay(latestCloudBackup.lastModify, now)
+                        ) {
+                            // 取云端时间而非 now：否则会把 24 小时窗口从"手机这次退出"起重算
+                            LocalConfig.lastBackup = latestCloudBackup.lastModify.coerceAtMost(now)
+                            AppLog.put("自动备份已跳过：云端 24 小时内有备份（${latestCloudBackup.displayName}）")
+                            return@withLock
+                        }
                         val backupZipFileName = getNowZipFileName()
                         if (!AppWebDav.hasBackUp(backupZipFileName)) {
                             backup(context, AppConfig.backupPath)
