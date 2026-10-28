@@ -383,11 +383,19 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10105` 递增**。
+> **下一次交付 versionCode 从 `10106` 递增**。
 
 ---
 
-- ✅ **10104（`3.26.102420c`）—— 当前交付，未发布**（修复阅读页重建首帧「背景位图已被回收」崩溃）：
+- ✅ **10105（`3.26.102818c`）—— 当前交付，未发布**（自动备份改为检查云端 24 小时内是否有任一设备的备份）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `cb61d132`（判据 + 回归锁）。
+  - **需求**：旧 `autoBack()` 只比本机 `LocalConfig.lastBackup`，再查一个带**本机设备名 + 日期**的云端文件名 ⇒ 平板刚备份过，手机仍会再传一份。新行为：本机闸门通过后，用 `AppWebDav.lastBackUp()` 取云端**最近一次备份**（不区分设备），其 `lastModify` 在 24 小时内则跳过，并把 `lastBackup` 记账到该时间（`coerceAtMost(now)` 防服务端时钟超前）。
+  - ⚠️ **判据只看 `lastModify`，不看文件名**：文件名只有日期粒度且带设备名。WebDAV 未配置/查询失败 → 退回原行为并记 `AppLog`；**不得**把查询失败当成"刚备份过"而长期不备份。
+  - **验证**：`CloudBackupWindowTest` 4 项全绿（23h 跳过 / 25h 备份 / mtime=0 不算最近 / `autoBack` 接线断言）；全量单测 **310 项 / 10 失败**，失败仍是既有基线（`CacheTaskStoreTest` 9、`ReadBookConfigTest` 1），无新增。冒烟（`emulator-5554`，sk2 10104→10105 覆盖升级，`firstInstallTime` 仍 `2026-09-21 10:09:56`）：模拟器未配 WebDAV，退出主界面后仍按原逻辑重写本地 `backup.zip`，无 FATAL。
+  - ⚠️ **跨设备云端分支未做 e2e**：模拟器没有 WebDAV 账号；需两台真机验证（平板备份后，手机 24h 内退出不应再上传）。
+  - **产物**：正式版 36,181,677 B ＋ 共存版 36,181,612 B；均 `10105` / `3.26.102818c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
+
+- ✅ **10104（`3.26.102420c`）—— 历史交付，未发布**（修复阅读页重建首帧「背景位图已被回收」崩溃）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `d1ab3532`（修复 + 回归锁 + 该 `.kt` 声明为 Test 输入）。
   - **现象**：平板 TB-9707F／Android 13（共存版 `sk2`，10103）**10-23 12:15:01** 与 **10-24 12:09:37** 各崩一次，栈完全相同 —— `Canvas: trying to use a recycled bitmap` → `BitmapDrawable.draw` → `LayerDrawable.draw` → `View.drawBackground` → `ReadView.dispatchDraw(ReadView.kt:314)`。
   - **触发时序**（app 自己的 `cache/logs/appLog-*` 逐行对齐）：阅读页 `onPause` → `BookTocLoadingActivity`／`BookInfoActivity` 走一遍 → **同一个 ReadBookActivity 新实例 `onCreate`/`onResume`（旧实例全程未 `onDestroy`）** → 新 `ReadView.init`/`onSizeChanged` 调 `ReadBookConfig.upBg()` → **72 ms 后首帧绘制即 FATAL**。
@@ -410,22 +418,7 @@ uiautomator2 / ADB
   - **产物**：正式版 36,181,433 B ＋ 共存版 36,181,107 B；均 `10103` / `3.26.101905c` / 阅读SK / arm64-v8a / 8 dex / apksigner 退出码 0。Release 两资产成对上传（`…_arm64-v8a.apk` ＋ `…_arm64-v8a_sk2-coexist.apk`），target `main`，Pre-release。
   - **发布说明只写两条用户可见结论**（作者要求）：① 自动清理视频/音频缓存，避免占用存储过大；② 修复听书过程中重新进入阅读界面的崩溃问题。**根因与验证细节只留在 `发布版更新记录.md`，不写进 Release 正文。**
 
-- ✅ **10102（`3.26.101720c`）—— 历史交付，未发布**（TTS 音频缓存加容量治理）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `e71e8042`（清扫 + 纯函数 + 单测）、`8840c0e1`（两处 e2e 抓出的实质缺陷）、`ece3e93a`（日志单位）、本节（文档基线）。
-  - **① `tts_cache` 之前完全没有容量上限**：10100 的 200MB 预算只覆盖 `video_media` / `audio_media`。系统 TTS 实时缓存（`ttsWavMode` + `ttsRealtimeCache`）会把每个朗读单元的 wav 无上限写进 `book_cache/<书>/tts_cache/<章节>/`，该目录属 `externalFiles`，被系统计为**用户数据**而非缓存——与 10100 修掉的 video_media 同类，只是当时没覆盖到。用户主诉「主要听书」正是长期累积路径。
-  - **规则（作者选定）**：**只留当前章，其余全删**；但用户**主动批量预缓存**过的章必须豁免（那是他排队合成的产物，删了等于白做）。
-  - **实现**：`TtsCacheSweep.kt` = 纯决策函数 `planTtsCacheSweep`（不碰 `appCtx`，JVM 可测）；`TtsCacheJanitor.kt` = 唯一清扫入口，两个触发点（朗读服务销毁后延迟 8s / App 启动兜底）。删章为**章节目录整删**，不做单元级 LRU（章节是这套缓存唯一自然身份）。
-  - ⚠️ **批量预缓存标记放 `tts_cache_complete/<章节stem>/`（与 `tts_cache/` 同级）**，同 10100 的 `*_media_complete/` 约定。**刻意不放进章节目录内**：章节目录会被 `ExportBookService` 整目录扫描，标记文件会污染导出报告（变成「未映射缓存」）。
-  - ⚠️ **红线 1（启动清扫必须按持久化进度留章）**：`ReadBook.book` 是内存态，**冷启动必为 null**，用它判断当前章会让保留集退化成空集，把「上次听书的那一章」也当过期缓存删掉。只能取每本书自己的 `books.durChapterIndex`。回归锁 `emptyKeepDeletesAllUnmarked`。
-  - ⚠️ **红线 2（退出清扫必须用引擎章节身份，不要用 `textChapter`）**：`textChapter?.chapter` 在服务销毁流程中可能已被清空，导致清扫登记**静默不执行**（日志只有 `onDestroy`、没有清扫）。改用引擎私有光标 `currentChapterIndex`。
-  - ⚠️ **清扫会跳过正在批量合成的书**（`CacheTtsWorkerRegistry.isBookActive`）；按章删缓存时同步清标记（`BookHelp.delChapterCache` → `clearBatchMark`）。
-  - ⚠️ **日志单位按量级选**：`<1MB` 用 MB 整数截断会写「回收 0MB」，把真实回收量藏掉——本次排查就被它误导过一次。已改为 `>=1MB` 用 MB、否则 KB。
-  - **验证**：单测 302 项 / 10 失败（＝既有基线，无新增）。**双向证伪**：去掉 `batch` 判据 ⇒ `batchChaptersAreNeverDeleted` / `emptyKeepDeletesAllUnmarked` 双双 RED。
-  - **e2e**（`emulator-5554`，10101→10102 覆盖升级，`firstInstallTime` 未变）：注入无标记过期章 + 带标记章 → ① 启动清扫删过期的、留当前章与标记章（2428KB→1716KB，日志 `回收 700KB`）；② 真实听书 → 点悬浮面板「停止」⇒ `退出清扫登记 chapterIndex:25` → 8s 后 `清扫 删除 2 章`，过期章消失、当前章与标记章保留。
-  - **产物**：正式版 36,181,183 B ＋ 共存版 36,181,426 B；均 `10102` / `3.26.101720c` / 阅读SK / arm64-v8a / 8 dex / apksigner 无错误。已在 `release/`（3 文件约定）。
-  - ⚠️ **`assembleAppSk2` 单独重跑可能显示 `UP-TO-DATE` 而复用旧 APK**（本次踩到：sk2 时间戳比 release 早）。核对产物必须看 `LastWriteTime`，不能只看文件名；怀疑时先删 `app\build\outputs\apk\app\sk2\*.apk` 再编。
-
-<!-- §6 仅保留最近 3 条交付；10101 / 10098 / 10097 / 10096 / 10094 / 10089 / 10086 / 10081 / 10076 及更早的逐版净增量见 companion/发布版更新记录.md §1。 -->
+<!-- §6 仅保留最近 3 条交付；10102 / 10101 / 10098 / 10097 / 10096 / 10094 / 10089 / 10086 / 10081 / 10076 及更早的逐版净增量见 companion/发布版更新记录.md §1。 -->
 
 ## 7. 当前机器环境与配套文档（2026-09-04 迁移后）
 
