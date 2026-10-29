@@ -14,6 +14,7 @@ import io.legado.app.constant.BookType
 import io.legado.app.constant.PageAnim
 import io.legado.app.data.appDb
 import io.legado.app.help.book.BookHelp
+import io.legado.app.help.book.BookUpsert
 import io.legado.app.help.book.ContentProcessor
 import io.legado.app.help.book.getFolderNameNoCache
 import io.legado.app.help.book.isEpub
@@ -495,15 +496,12 @@ data class Book(
         if (appDb.bookDao.has(bookUrl)) {
             appDb.bookDao.update(this)
         } else {
-            appDb.bookDao.insert(this)
-            // 新书入库 = 书架**增加**（仅在线书会被判据计入，见 ShelfIdentity）。
-            // ⚠️ 本处只覆盖**走 `save()` 的**那部分加架路径（如「添加网址」、本地/远程导入）。
-            // ⚠️ **`save()` 不是加架的唯一收口**：主流的「加入书架」（搜索页 / 详情页按钮）
-            // 走 `BookUpsert.upsertByIdentity()`，它直接写 `bookDao`、**不经过本方法**——
-            // 那条路径的触发接在 `BookUpsert.savePlain()` / `merge()` 末尾。
-            // 10075 只接了本处，导致这些路径**全部漏触发**（加书不备份），10076 修。
-            // 判据幂等（比对身份键集合）+ 8 秒去抖，progress/toc 等高频更新不会重复备份。
-            Backup.autoBackupOnShelfChangeIfNeeded(appCtx)
+            // ⚠️ **不能裸 insert**：换源/合并会把旧记录删掉（`BookUpsert` 的 `delete(stray)` /
+            // `delete(src)`），此时若有人在拿陈旧的 bookUrl 调 `save()`，裸 insert 会把刚被并掉的
+            // 记录“复活”成第二条书架条目（书名/作者相同、书源不同）。改走身份收敛：
+            // 库里有同书就并入并保留它，确实没有才插入。
+            // 自动备份的“加架”触发因此改由 `BookUpsert.savePlain()` 末尾统一完成。
+            BookUpsert.upsertByIdentity(this)
         }
     }
 

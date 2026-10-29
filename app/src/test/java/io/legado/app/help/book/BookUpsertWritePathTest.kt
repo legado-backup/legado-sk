@@ -72,4 +72,83 @@ class BookUpsertWritePathTest {
             branchIdx in 0 until updateIdx && updateIdx < replaceIdx
         )
     }
+
+    /**
+     * 书架重复书籍（同名同作者、不同书源）的结构性根因：
+     * `upsertByIdentity` 的「查同书候选 → 选 keep → 写入」全文都在事务外、无任何互斥，
+     * 并发调用（换源与加入书架几乎同时触发）会各自查到「库中没有同书」而各自 insert。
+     *
+     * 修复方式 = 把整段放进 `writeLock`（可重入，因为 upsert 内部还会调 merge）。
+     * 锁的互斥性由 JDK 保证，这里只能静态锁住「候选查询与写入都被包在同一把锁内」这个接线，
+     * 因此断言锚定**函数体委派**而非行号：入口函数只允许出现 `writeLock.withLock` + 委派。
+     */
+    @Test
+    fun upsertByIdentityMustSerializeSelectAndWrite() {
+        val source = moduleSource("src/main/java/io/legado/app/help/book/BookUpsert.kt").readText()
+        assertTrue(
+            "必须只有一把互斥锁（ReentrantLock 实例），否则两条写路径互不排除",
+            Regex("""ReentrantLock\(\)""").findAll(source).count() == 1
+        )
+        val entry = source
+            .substringAfter("fun upsertByIdentity(")
+            .substringBefore("private fun upsertLocked(")
+        assertTrue("未能定位 upsertByIdentity 入口", entry.isNotBlank())
+        assertTrue(
+            "upsertByIdentity 必须先进 writeLock 再委派 upsertLocked",
+            entry.contains("writeLock.withLock")
+        )
+        assertTrue(
+            "入口函数体内不得出现候选查询：SELECT 必须在锁内（与写入同一临界区）",
+            !entry.contains("getBooks(") && !entry.contains("savePlain(")
+        )
+        val locked = source
+            .substringAfter("private fun upsertLocked(")
+            .substringBefore("internal fun merge(")
+        assertTrue(
+            "upsertLocked 必须包含候选查询 .getBooks(（锁内完成查+写）",
+            locked.contains(".getBooks(")
+        )
+    }
+
+    @Test
+    fun mergeMustUseTheSameLock() {
+        val source = moduleSource("src/main/java/io/legado/app/help/book/BookUpsert.kt").readText()
+        val entry = source
+            .substringAfter("internal fun merge(")
+            .substringBefore("private fun mergeLocked(")
+        assertTrue("未能定位 merge 入口", entry.isNotBlank())
+        assertTrue(
+            "merge 可被外部（手动合并重复书籍）直接调用，必须拿同一把 writeLock",
+            entry.contains("writeLock.withLock") && !entry.contains("runInTransaction")
+        )
+        assertTrue(
+            "mergeLocked 必须包含事务写入",
+            source.substringAfter("private fun mergeLocked(").contains("appDb.runInTransaction {")
+        )
+    }
+
+    /**
+     * `Book.save()` 的 insert 分支曾经裸 `insert`：换源/合并删掉旧记录后，
+     * 拿陈旧 bookUrl 调 `save()` 会把已并掉的记录“复活”成第二条书架条目。
+     */
+    @Test
+    fun saveMustConvergeByIdentityInsteadOfBareInsert() {
+        val body = moduleSource("src/main/java/io/legado/app/data/entities/Book.kt")
+            .readText()
+            .substringAfter("fun save() {")
+            .substringBefore("fun delete() {")
+        assertTrue("未能定位 Book.save() 方法体", body.isNotBlank())
+        assertTrue(
+            "save() 的存在性分支必须保留：已存在走 update（@Update 不删行、不触发 CASCADE）",
+            body.contains("appDb.bookDao.has(bookUrl)") && body.contains("appDb.bookDao.update(this)")
+        )
+        assertTrue(
+            "save() 的「不存在」分支必须走 BookUpsert.upsertByIdentity(this)",
+            body.contains("BookUpsert.upsertByIdentity(this)")
+        )
+        assertTrue(
+            "save() 不得再裸 insert：并发/陈旧调用会复活已被合并删除的记录",
+            !body.contains("appDb.bookDao.insert(")
+        )
+    }
 }

@@ -8,6 +8,8 @@ import io.legado.app.help.ai.AiChapterPurifyService
 import io.legado.app.help.storage.Backup
 import io.legado.app.model.ReadBook
 import splitties.init.appCtx
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 /**
  * 书籍身份收敛的**写入收口**：所有「按身份入库」的路径都必须走这里。
@@ -25,6 +27,18 @@ import splitties.init.appCtx
 object BookUpsert {
 
     /**
+     * 书架身份收敛的唯一临界区。
+     *
+     * 「查同书候选 → 选出 keep → 写入」必须**整段**串行：并发路径（换源与加入书架
+     * 几乎同时触发）如果各自在事务外查到「库里没有同书」，就会各自 insert 出
+     * 不同 bookUrl 的同一本书，书架上留下两条同名同作者的重复记录。
+     *
+     * 选 `ReentrantLock` 而非 `Mutex`：本对象的写入是阻塞式 Room 调用、没有 suspend 点，
+     * 且 [merge] 会被 [upsertByIdentity] 内部再次调用，需要可重入。
+     */
+    private val writeLock = ReentrantLock()
+
+    /**
      * 按身份入库。
      *
      * @param incoming 新到的书（换源时是**新源**的那本）
@@ -38,6 +52,15 @@ object BookUpsert {
         incoming: Book,
         toc: List<BookChapter> = emptyList(),
         migrateFrom: Book? = null
+    ): Book = writeLock.withLock {
+        upsertLocked(incoming, toc, migrateFrom)
+    }
+
+    /** [upsertByIdentity] 的实体：**必须在 [writeLock] 之内调用**。 */
+    private fun upsertLocked(
+        incoming: Book,
+        toc: List<BookChapter>,
+        migrateFrom: Book?
     ): Book {
         val incomingKey = BookMergeRules.identityKeyOf(incoming)
             ?: run {
@@ -83,6 +106,16 @@ object BookUpsert {
      * 执行顺序是**不可调换**的（每一步都有实证理由，见行内注释）。
      */
     internal fun merge(
+        keep: Book,
+        src: Book,
+        toc: List<BookChapter>,
+        migrateFrom: Book?
+    ): Book = writeLock.withLock {
+        mergeLocked(keep, src, toc, migrateFrom)
+    }
+
+    /** [merge] 的实体：**必须在 [writeLock] 之内调用**（与候选查询同锁）。 */
+    private fun mergeLocked(
         keep: Book,
         src: Book,
         toc: List<BookChapter>,
