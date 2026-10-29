@@ -265,6 +265,13 @@ android {
         inputs.file("src/main/java/io/legado/app/help/config/ReadBookConfig.kt")
                 .withPropertyName("readBookBackgroundBitmapGuardSource")
                 .withPathSensitivity(PathSensitivity.RELATIVE)
+        // BookUpsertWritePathTest 断言换源/入库的写入分流与实际入口（读源码文本），同样必须声明。
+        inputs.files(
+                "src/main/java/io/legado/app/help/book/BookUpsert.kt",
+                "src/main/java/io/legado/app/ui/book/info/BookInfoViewModel.kt",
+                "src/main/java/io/legado/app/data/entities/Book.kt"
+        ).withPropertyName("bookUpsertWritePathGuardSources")
+                .withPathSensitivity(PathSensitivity.RELATIVE)
         // 注：UpdateManagerAssetSelectionTest 调用的是**编好的** UpdateManager（非读源码文本），
         // class 字节本就是 Test 任务的输入，故无需在此声明。
     }

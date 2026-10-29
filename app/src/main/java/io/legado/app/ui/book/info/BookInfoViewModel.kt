@@ -480,12 +480,17 @@ class BookInfoViewModel(application: Application) : BaseViewModel(application) {
                 loadWebFile(book)
             }
             // 统一入库：库里已有同书就合并进它，避免「书架里已有这本、从别的源再进详情页」
-            // 时新增一条。不在架的书同样要收敛 —— 它可能已在库中（例如刚被移出书架）。
+            // 时新增一条。
             book.removeType(BookType.updateError)
+            // 「试读不入架」：不在架的书换源后仍是试读。
+            // 不打这个位，换源就等于替用户点了「加入书架」（找书时的书本来就未入架）。
+            if (!inBookshelf) {
+                book.addType(BookType.notShelf)
+            }
             val settled = BookUpsert.upsertByIdentity(book, toc, migrateFrom = oldBook)
             CacheManifestHelper.refreshAsync(settled, toc)
-            // 入库成功后这本书确实在架上了（合并进既有记录也算在架）。
-            inBookshelf = true
+            // ⚠️ 这里不能把 inBookshelf 置真：不在架的书换源并没有入架，
+            // 置真会让详情页谎报「已在书架」，并与上面按 inBookshelf 判定是否打 notShelf 自相矛盾。
             // ⚠️ 必须推 settled：合并时它的 bookUrl 是既有记录的，
             // 后续 readBook()/startReadActivity 都从这里取 bookUrl。
             bookData.postValue(settled)

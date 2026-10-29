@@ -151,4 +151,55 @@ class BookUpsertWritePathTest {
             !body.contains("appDb.bookDao.insert(")
         )
     }
+
+    /**
+     * 试读身份必须随换源一起搬：迁移源带 notShelf 时，新的书源那本也要打上 notShelf。
+     *
+     * 不加这一步的后果：新源那本没有 notShelf 位 → `identityKeyOf` 非空 → 查不到同书
+     * （试读行不参与身份收敛）→ `savePlain` 插一条**书架**记录，等于换源替用户点了「加入书架」。
+     * 阅读页/漫画/音频换源都只传 `migrateFrom`，所以这条规则只能放在统一入口里。
+     */
+    @Test
+    fun upsertMustCarryNotShelfFromMigrationSource() {
+        val locked = moduleSource("src/main/java/io/legado/app/help/book/BookUpsert.kt")
+            .readText()
+            .substringAfter("private fun upsertLocked(")
+            .substringBefore("internal fun merge(")
+
+        assertTrue("未能定位 upsertLocked 方法体", locked.isNotBlank())
+        val carryIdx = locked.indexOf("migrateFrom.isType(BookType.notShelf)")
+        val keyIdx = locked.indexOf("BookMergeRules.identityKeyOf(incoming)")
+        assertTrue(
+            "必须在算身份键之前把 notShelf 从 migrateFrom 搬到 incoming",
+            carryIdx >= 0 && carryIdx < keyIdx
+        )
+    }
+
+    /**
+     * 详情页换源的「自动入架」（2026-10-29 作者实测：找书时换源，书自己跑到书架上）。
+     *
+     * 旧实现无条件入库并 `inBookshelf = true`，于是「未入架 → 换源 → 插一条无 notShelf 的行」
+     * 就成了静默加书架。契约：不在架时先打 notShelf（与 `readBook()` 一致），且不得改写
+     * `inBookshelf`（否则详情页按钮状态与实际书架不符）。
+     */
+    @Test
+    fun detailChangeToMustNotPutUnshelvedBookOnShelf() {
+        val body = moduleSource("src/main/java/io/legado/app/ui/book/info/BookInfoViewModel.kt")
+            .readText()
+            .substringAfter("fun changeTo(source: BookSource, book: Book, toc")
+            .substringBefore("fun topBook()")
+
+        assertTrue("未能定位 BookInfoViewModel.changeTo 方法体", body.isNotBlank())
+        val guardIdx = body.indexOf("if (!inBookshelf)")
+        val markIdx = body.indexOf("book.addType(BookType.notShelf)")
+        val upsertIdx = body.indexOf("BookUpsert.upsertByIdentity(")
+        assertTrue(
+            "不在架换源必须先打 notShelf（否则插入的书架行 = 静默加书架）",
+            guardIdx in 0 until markIdx && markIdx < upsertIdx
+        )
+        assertTrue(
+            "换源不得改写 inBookshelf：不在架的书换源并未入架",
+            !body.contains("inBookshelf = true")
+        )
+    }
 }

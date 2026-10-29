@@ -1,5 +1,6 @@
 package io.legado.app.help.book
 
+import io.legado.app.constant.BookType
 import io.legado.app.data.appDb
 import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookChapter
@@ -62,6 +63,12 @@ object BookUpsert {
         toc: List<BookChapter>,
         migrateFrom: Book?
     ): Book {
+        // 换源不得把「试读」变成书架书：迁移源是试读记录时，试读身份必须随新书源一起搬过去。
+        // 否则新源那本没有 notShelf 位 → 查不到候选 → savePlain 直接插一条书架记录，
+        // 等于用户点了「加入书架」（阅读页/漫画/音频换源都会走这里）。
+        if (migrateFrom != null && migrateFrom.isType(BookType.notShelf)) {
+            incoming.addType(BookType.notShelf)
+        }
         val incomingKey = BookMergeRules.identityKeyOf(incoming)
             ?: run {
                 // 不参与身份收敛的书（本地书 / 未入架 / 无书名）走朴素路径。

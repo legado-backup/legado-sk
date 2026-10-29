@@ -8,6 +8,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -501,5 +502,22 @@ class BookMergeRulesTest {
 
         assertEquals(0b10L, local.group)
         assertEquals(0b100L, backup.group)
+    }
+
+    /**
+     * 换源不得把「试读」变成书架书。
+     *
+     * `BookUpsert.savePlain` 在「换源但未命中同书」时用 `mergeInto(migrateFrom, book)` 产出落库对象，
+     * 这里锁住该裁决：迁移源带 notShelf 时，合并结果必须仍是试读（身份键为 null，不进书架身份收敛）。
+     */
+    @Test
+    fun `merge keeps not shelf flag of the migration source`() {
+        val trial = book("trial-url", type = BookType.text or BookType.notShelf)
+        val newSource = book("source-url", type = BookType.text)
+
+        val merged = BookMergeRules.mergeInto(trial, newSource, listOf(chapter(0)))
+
+        assertTrue("试读位必须保留", merged.isType(BookType.notShelf))
+        assertNull("试读书不得进入书架身份收敛", BookMergeRules.identityKeyOf(merged))
     }
 }
