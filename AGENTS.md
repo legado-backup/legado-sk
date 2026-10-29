@@ -394,7 +394,8 @@ uiautomator2 / ADB
   - **修法**：① `changeTo` 不在架时先 `book.addType(BookType.notShelf)`（与 `BookInfoActivity.readBook()` 同写法），并**删掉** `inBookshelf = true`；② `BookUpsert.upsertLocked` 在算身份键前把 **`migrateFrom` 的 notShelf 搬到 `incoming`**，一次覆盖阅读页/漫画/音频三个换源入口（它们只传 migrateFrom）。
   - ⚠️ **红线**：`changeTo` 不得再出现 `inBookshelf = true`；`upsertLocked` 内的 notShelf 搬运必须早于 `BookMergeRules.identityKeyOf(incoming)`。回归锁 `BookUpsertWritePathTest` 2 项 + `BookMergeRulesTest` 1 项（已双向证伪：去掉两处修复 ⇒ 2 项 RED）。
   - **验证**：全量单测 **316 项 / 10 失败**（＝旧基线 313/10 ＋ 新增 3 项全绿）。模拟器（`emulator-5554`，sk2 10106→10107 覆盖，`firstInstallTime` 仍 `2026-09-21 10:09:56`）：未入架书详情页按钮为「放入书架」；加架后书架 2 条、无同名重复、无 FATAL；删除后回到 1 条。真机平板（`HA1KAPWG`，10106→10107 增量升级，`firstInstallTime` 仍 `2026-09-21 13:08:56`）「找书→换源」由作者实测通过。
-  - ⚠️ **换源 e2e 在模拟器上做不了**：模拟器只有 `番茄小说 (SK特供)` 一个可用书源（`小原文学网 (自建)` 搜索返回 0 条），换源页只列当前源，无法真正切源。结论依据＝真机实测 + 源码级回归锁。
+  - **模拟器换源实测（第二轮，已补做）**：`[hp]信徒`（书架内，来源番茄小说）→ 详情页「更换书源」→ 候选只有 `小原文学网` 一条时**应用自动应用**，详情页 3.0s 内稳定，来源变为「小原文学网」，返回书架仍是 **2 条（该书 1 条 + 星际）无重复**；未入架书（`hp：韦斯莱家长女会做复活甲`、`[hp]信徒`）走同一路径后按钮仍为「放入书架」、书架条目不变。全程 `crash` buffer **FATAL 0**。
+  - ⚠️ **但「未入架书真跨源切换」这一细分场景未覆盖**：同一本书往往只在一个源上有（`[hp]信徒` 换源候选只有小原、`hp：韦斯莱家长女会做复活甲` 只有番茄），且中文关键词无法注入（`input text` 不支持 CJK、`SearchActivity` 未 exported），无法凑出“双源未入架书”。该场景依据＝真机实测 + 源码级回归锁。
   - ⚠️ **「换源时卡一下」不是本次引入**：`changeTo` 全程在 IO（`BaseViewModel.execute`），`Book.save()` 调用点也都在 IO；换源耗时来自既有的整本目录 `bookChapterDao.insert(*toc)` 与详情页目录列表重建。
   - **产物**：正式版 36,181,661 B ＋ 共存版 36,181,603 B；均 `10107` / `3.26.102914c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
 
