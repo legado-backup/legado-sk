@@ -383,11 +383,22 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10107` 递增**。
+> **下一次交付 versionCode 从 `10108` 递增**。
 
 ---
 
-- ✅ **10106（`3.26.102913c`）—— 当前交付，未发布**（修复书架重复书籍：换源与加架并发 / `Book.save()` 复活）：
+- ✅ **10107（`3.26.102914c`）—— 当前交付，未发布**（修复：找书时换源会静默把未入架的书加入书架）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `d483a173`。
+  - **作者实测**：在搜索/发现页找到一本**还没入架**的书，点换源，换完这本书就出现在书架上（10106 之前就有，不是 10106 引入）。
+  - **根因**：`0aa0e21e`（换源入库收口）把 `BookInfoViewModel.changeTo` 里原有的 `if (inBookshelf) { 入库 }` 守卫换成**无条件** `upsertByIdentity` + `inBookshelf = true`。搜索来的书 type 无 `notShelf` 位 → `identityKeyOf` 非空 → 试读行不参与身份收敛 → 查不到候选 → `savePlain` 插一条**无 notShelf** 的新行 = 正式入架。（该提交 message 自己写着「保留 notShelf 路径不动」，自相矛盾。）
+  - **修法**：① `changeTo` 不在架时先 `book.addType(BookType.notShelf)`（与 `BookInfoActivity.readBook()` 同写法），并**删掉** `inBookshelf = true`；② `BookUpsert.upsertLocked` 在算身份键前把 **`migrateFrom` 的 notShelf 搬到 `incoming`**，一次覆盖阅读页/漫画/音频三个换源入口（它们只传 migrateFrom）。
+  - ⚠️ **红线**：`changeTo` 不得再出现 `inBookshelf = true`；`upsertLocked` 内的 notShelf 搬运必须早于 `BookMergeRules.identityKeyOf(incoming)`。回归锁 `BookUpsertWritePathTest` 2 项 + `BookMergeRulesTest` 1 项（已双向证伪：去掉两处修复 ⇒ 2 项 RED）。
+  - **验证**：全量单测 **316 项 / 10 失败**（＝旧基线 313/10 ＋ 新增 3 项全绿）。模拟器（`emulator-5554`，sk2 10106→10107 覆盖，`firstInstallTime` 仍 `2026-09-21 10:09:56`）：未入架书详情页按钮为「放入书架」；加架后书架 2 条、无同名重复、无 FATAL；删除后回到 1 条。真机平板（`HA1KAPWG`，10106→10107 增量升级，`firstInstallTime` 仍 `2026-09-21 13:08:56`）「找书→换源」由作者实测通过。
+  - ⚠️ **换源 e2e 在模拟器上做不了**：模拟器只有 `番茄小说 (SK特供)` 一个可用书源（`小原文学网 (自建)` 搜索返回 0 条），换源页只列当前源，无法真正切源。结论依据＝真机实测 + 源码级回归锁。
+  - ⚠️ **「换源时卡一下」不是本次引入**：`changeTo` 全程在 IO（`BaseViewModel.execute`），`Book.save()` 调用点也都在 IO；换源耗时来自既有的整本目录 `bookChapterDao.insert(*toc)` 与详情页目录列表重建。
+  - **产物**：正式版 36,181,661 B ＋ 共存版 36,181,603 B；均 `10107` / `3.26.102914c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
+
+- ✅ **10106（`3.26.102913c`）—— 历史交付，未发布**（修复书架重复书籍：换源与加架并发 / `Book.save()` 复活）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `95ce025b`（互斥 + save 收口 + 回归锁）。
   - **触发原因（作者提供）**：在找书里**换源**、并在换源前后**加入书架**，书架出现两本同名同作者、书源不同的重复书。两层结构原因：① `BookUpsert.upsertByIdentity` 的「查候选 → 选 keep → 写入」全在事务外**无互斥**，两路并发各自查到「无同书」就各自 insert；② `Book.save()` 的不存在分支**裸 insert**，换源/合并 `delete(stray)`/`delete(src)` 之后拿陈旧 `bookUrl` 调 `save()` 会把已并掉的记录**复活**。
   - **修法**：`BookUpsert` 加唯一可重入锁 `writeLock`，`upsertByIdentity`/`merge` 入口只委派 `upsertLocked`/`mergeLocked`（查与写同锁）；`Book.save()` 不存在分支改走 `BookUpsert.upsertByIdentity(this)`，自动备份触发统一归 `savePlain()` 末尾。
@@ -395,6 +406,8 @@ uiautomator2 / ADB
   - **验证**：单测 **313 项 / 10 失败**（＝旧基线 310/10 ＋ 新增 3 项全绿）；冒烟（`emulator-5554`，sk2 10105→10106 覆盖升级，`firstInstallTime` 仍 `2026-09-21 10:09:56`）书架/详情页/阅读页进退出正常、「合并重复书籍」提示无重复、`crash` 0 条。
   - ⚠️ **核心场景未做模拟器 e2e**（模拟器只有本地书、无在线书源，release 包不可 `run-as` 查 DB）：结论依据是代码结构 + 回归锁，**真机待作者验证**。
   - **产物**：正式版 36,181,523 B ＋ 共存版 36,181,230 B；均 `10106` / `3.26.102913c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
+
+<!-- §6 仅保留最近 3 条交付；10104 / 10103 / 10102 / 10101 / 10098 / 10097 / 10096 / 10094 / 10089 / 10086 / 10081 / 10076 及更早的逐版净增量见 companion/发布版更新记录.md §1。 -->
 
 - ✅ **10105（`3.26.102818c`）—— 历史交付，未发布**（自动备份改为检查云端 24 小时内是否有任一设备的备份）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `cb61d132`（判据 + 回归锁）。
