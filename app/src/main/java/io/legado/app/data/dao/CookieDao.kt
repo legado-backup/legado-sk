@@ -9,6 +9,9 @@ interface CookieDao {
     @Query("SELECT * FROM cookies Where url = :url")
     fun get(url: String): Cookie?
 
+    @Query("select * from cookies")
+    fun all(): List<Cookie>
+
     @Query("select * from cookies where url like '%|%'")
     fun getOkHttpCookies(): List<Cookie>
 

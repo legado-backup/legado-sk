@@ -224,6 +224,15 @@ internal object BackupItems {
      */
     const val navigationBarDirName = "navigationBarPackages"
 
+    /**
+     * 「登录状态」两个 json 的文件名。
+     *
+     * ⚠️ 备份写入（`Backup.kt`）与恢复消费（`Restore.kt`）必须共用这两个常量，
+     * 且必须同时出现在 [all] 的 `loginState` 项目里，否则恢复侧过滤会漏项。
+     */
+    const val loginCookieFileName = "cookie.json"
+    const val loginCacheFileName = "loginCache.json"
+
     val all: List<BackupTargetItem>
         get() = listOf(
             BackupTargetItem(
@@ -232,6 +241,11 @@ internal object BackupItems {
                 listOf("bookshelf.json", "bookmark.json", "bookGroup.json", "covers")
             ),
             BackupTargetItem("bookSource", "书源", listOf("bookSource.json", "sourceSub.json")),
+            BackupTargetItem(
+                "loginState",
+                "登录状态（书源 Cookie、登录信息、源变量）",
+                listOf(loginCookieFileName, loginCacheFileName)
+            ),
             BackupTargetItem("rss", "RSS", listOf("rssSources.json", "rssStar.json")),
             BackupTargetItem("replaceRule", "替换规则", listOf("replaceRule.json")),
             BackupTargetItem(

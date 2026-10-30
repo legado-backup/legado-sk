@@ -165,6 +165,8 @@ object Backup {
             "httpTTS.json",
             "keyboardAssists.json",
             "dictRule.json",
+            BackupItems.loginCookieFileName,
+            BackupItems.loginCacheFileName,
             "servers.json",
             DirectLinkUpload.ruleFileName,
             ReadBookConfig.configFileName,
@@ -400,6 +402,8 @@ object Backup {
         writeListToJson(appDb.httpTTSDao.all, "httpTTS.json", backupPath)
         writeListToJson(appDb.keyboardAssistsDao.all, "keyboardAssists.json", backupPath)
         writeListToJson(appDb.dictRuleDao.all, "dictRule.json", backupPath)
+        writeListToJson(appDb.cookieDao.all(), BackupItems.loginCookieFileName, backupPath)
+        writeListToJson(appDb.cacheDao.sourceState(), BackupItems.loginCacheFileName, backupPath)
         GSON.toJson(appDb.serverDao.all).let { json ->
             // SK 定制：加密失败必须中止备份，绝不允许静默退明文（拒绝静默兜底红线）
             val encrypted = aes.runCatching {

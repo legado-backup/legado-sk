@@ -19,6 +19,8 @@ import io.legado.app.data.entities.BookIllustration
 import io.legado.app.data.entities.BookGroup
 import io.legado.app.data.entities.BookSource
 import io.legado.app.data.entities.Bookmark
+import io.legado.app.data.entities.Cache
+import io.legado.app.data.entities.Cookie
 import io.legado.app.data.entities.DictRule
 import io.legado.app.data.entities.HttpTTS
 import io.legado.app.data.entities.KeyboardAssist
@@ -31,6 +33,8 @@ import io.legado.app.data.entities.RuleSub
 import io.legado.app.data.entities.SearchKeyword
 import io.legado.app.data.entities.Server
 import io.legado.app.data.entities.TxtTocRule
+import io.legado.app.help.AppCacheManager
+import io.legado.app.help.CacheManager
 import io.legado.app.help.DirectLinkUpload
 import io.legado.app.help.LauncherIconHelp
 import io.legado.app.help.book.BookMergeRules
@@ -339,6 +343,18 @@ object Restore {
             }
             fileToListT<RssSource>(path, "rssSources.json")?.let {
                 appDb.rssSourceDao.insert(*it.toTypedArray())
+            }
+            // 登录状态：Cookie 行与 cache 里的登录信息/源变量。旧备份没有这两个文件，
+            // fileToListT 返回 null 即跳过，行为与以前完全一致。
+            fileToListT<Cookie>(path, BackupItems.loginCookieFileName)?.let {
+                appDb.cookieDao.insert(*it.toTypedArray())
+                // 内存里的旧 cookie 会遮蔽刚恢复的行，必须一起丢弃
+                it.forEach { cookie -> CacheManager.deleteMemory("${cookie.url}_cookie") }
+            }
+            fileToListT<Cache>(path, BackupItems.loginCacheFileName)?.let {
+                appDb.cacheDao.insert(*it.toTypedArray())
+                // 同理：内存 LRU 里的旧值会优先命中
+                AppCacheManager.clearSourceVariables()
             }
             fileToListT<RssStar>(path, "rssStar.json")?.let {
                 appDb.rssStarDao.insert(*it.toTypedArray())

@@ -21,6 +21,21 @@ interface CacheDao {
     @Query("delete from caches where `key` = :key")
     fun delete(key: String)
 
+    /**
+     * 登录态与自定义变量（备份 `loginCache.json` 的唯一取数口径）。
+     *
+     * 前缀口径与 [deleteSourceVariables] 一致，但这里是**按前缀全取**（跨书源），
+     * 因为备份要带走所有源的登录状态，而不是某一个源。
+     */
+    @Query(
+        """select * from caches where `key` like 'v\_%' escape '\'
+        or `key` like 'userInfo\_%' escape '\'
+        or `key` like 'loginHeader\_%' escape '\'
+        or `key` like 'sourceVariable\_%' escape '\'
+        or `key` like 'infoMap\_%' escape '\'"""
+    )
+    fun sourceState(): List<Cache>
+
     @Query(
         """delete from caches where `key` like 'v_' || :key || '_%'
         or `key` = 'userInfo_' || :key

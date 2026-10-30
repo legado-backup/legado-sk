@@ -272,6 +272,14 @@ android {
                 "src/main/java/io/legado/app/data/entities/Book.kt"
         ).withPropertyName("bookUpsertWritePathGuardSources")
                 .withPathSensitivity(PathSensitivity.RELATIVE)
+        // LoginStateBackupTest 断言登录态备份/恢复两侧成对（读源码文本），同样必须声明。
+        inputs.files(
+                "src/main/java/io/legado/app/help/storage/Backup.kt",
+                "src/main/java/io/legado/app/help/storage/Restore.kt",
+                "src/main/java/io/legado/app/help/storage/BackupConfig.kt",
+                "src/main/java/io/legado/app/data/dao/CacheDao.kt"
+        ).withPropertyName("loginStateBackupGuardSources")
+                .withPathSensitivity(PathSensitivity.RELATIVE)
         // 注：UpdateManagerAssetSelectionTest 调用的是**编好的** UpdateManager（非读源码文本），
         // class 字节本就是 Test 任务的输入，故无需在此声明。
     }
