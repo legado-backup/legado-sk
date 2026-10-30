@@ -383,11 +383,21 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10108` 递增**。
+> **下一次交付 versionCode 从 `10109` 递增**。
 
 ---
 
-- ✅ **10107（`3.26.102914c`）—— 当前交付，已发布 Pre-release `v3.26.102914-10107`（2026-10-30）**（修复：找书时换源会静默把未入架的书加入书架）：
+- ✅ **10108（`3.26.103013c`）—— 当前交付，未发布**（备份/恢复纳入书源登录状态，供正式版与共存版互通）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `dd7c31e5`。
+  - **需求**：`io.legado.app.c` 与 `io.legado.app.sk2` 数据完全隔离，换包要重登每个书源。作者选择「只补登录态」方案，通道 WebDAV + 公共目录，**手动两步**（一方备份、另一方恢复），不做启动自动同步。
+  - **缺口事实**：登录态不在任何 json 里 —— 在 `cookies` 表（按二级域名）与 `caches` 表的五类前缀 `loginHeader_`/`userInfo_`/`sourceVariable_`/`v_`/`infoMap_`。
+  - **改动**：`Backup.kt` 新增 `cookie.json`（`appDb.cookieDao.all()`）与 `loginCache.json`（`appDb.cacheDao.sourceState()`）**并加入 `backupFileNames`**；`Restore.restoreDbData` 事务内消费二者并清内存旧值；`BackupItems` 新增 `loginState` 项目（`isSelected` 默认 true ⇒ 存量设备自动勾选）；`CookieDao.all()` / `CacheDao.sourceState()` 两个新 DAO 方法。
+  - ⚠️ **红线**：三处必须成对——**落盘 + 进 `backupFileNames` + 恢复消费**。只落盘不进清单会被 `existingZipSources` 静默过滤（文件永远不进 zip）；只恢复不清内存会被 LRU 旧值遮蔽。回归锁 `LoginStateBackupTest` 4 项（已双向证伪），源码级断言须在 `app/build.gradle` 声明 `loginStateBackupGuardSources`。
+  - ⚠️ **已知边界**：`userInfo_*` 用设备 `ANDROID_ID` 前 16 字节 AES 加密 ⇒ **同设备两包可互解，跨设备解不开**；导入的本地书文件本体不在备份内；同步是手动两步。
+  - **验证**：全量单测 **320 项 / 10 失败**（＝旧基线 316/10 ＋ 新增 4 项全绿）。模拟器（`emulator-5554`，正式版 10098→10108、共存版 10107→10108，两个 `firstInstallTime` 均未变）：共存版备份 → logcat `cookie.json 列表大小 2 / 写入 185`、`loginCache.json 列表大小 6 / 写入 868`，zip 内两文件真实（2 条 gitee cookie + 6 条 `userInfo_httpTts:*`/`v_番茄_fq_*`）；正式版恢复 → 选择恢复项目出现「登录状态（书源 Cookie、登录信息、源变量）1 KB」→ 恢复后两表行**逐字一致**（root 拉库核对），书源就位、书架无重复、FATAL 0；「默认备份内容」10 个 checkable 全 `checked=true`。
+  - **产物**：正式版 36,183,363 B ＋ 共存版 36,183,504 B；均 `10108` / `3.26.103013c` / 阅读SK / arm64-v8a / apksigner 0。已在 `release/`（3 文件约定）。
+
+- ✅ **10107（`3.26.102914c`）—— 历史交付，已发布 Pre-release `v3.26.102914-10107`（2026-10-30）**（修复：找书时换源会静默把未入架的书加入书架）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `d483a173`。
   - **作者实测**：在搜索/发现页找到一本**还没入架**的书，点换源，换完这本书就出现在书架上（10106 之前就有，不是 10106 引入）。
   - **根因**：`0aa0e21e`（换源入库收口）把 `BookInfoViewModel.changeTo` 里原有的 `if (inBookshelf) { 入库 }` 守卫换成**无条件** `upsertByIdentity` + `inBookshelf = true`。搜索来的书 type 无 `notShelf` 位 → `identityKeyOf` 非空 → 试读行不参与身份收敛 → 查不到候选 → `savePlain` 插一条**无 notShelf** 的新行 = 正式入架。（该提交 message 自己写着「保留 notShelf 路径不动」，自相矛盾。）
@@ -409,28 +419,6 @@ uiautomator2 / ADB
   - ⚠️ **核心场景未做模拟器 e2e**（模拟器只有本地书、无在线书源，release 包不可 `run-as` 查 DB）：结论依据是代码结构 + 回归锁，**真机待作者验证**。
   - **产物**：正式版 36,181,523 B ＋ 共存版 36,181,230 B；均 `10106` / `3.26.102913c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
 
-<!-- §6 仅保留最近 3 条交付；10104 / 10103 / 10102 / 10101 / 10098 / 10097 / 10096 / 10094 / 10089 / 10086 / 10081 / 10076 及更早的逐版净增量见 companion/发布版更新记录.md §1。 -->
-
-- ✅ **10105（`3.26.102818c`）—— 历史交付，未发布**（自动备份改为检查云端 24 小时内是否有任一设备的备份）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `cb61d132`（判据 + 回归锁）。
-  - **需求**：旧 `autoBack()` 只比本机 `LocalConfig.lastBackup`，再查一个带**本机设备名 + 日期**的云端文件名 ⇒ 平板刚备份过，手机仍会再传一份。新行为：本机闸门通过后，用 `AppWebDav.lastBackUp()` 取云端**最近一次备份**（不区分设备），其 `lastModify` 在 24 小时内则跳过，并把 `lastBackup` 记账到该时间（`coerceAtMost(now)` 防服务端时钟超前）。
-  - ⚠️ **判据只看 `lastModify`，不看文件名**：文件名只有日期粒度且带设备名。WebDAV 未配置/查询失败 → 退回原行为并记 `AppLog`；**不得**把查询失败当成"刚备份过"而长期不备份。
-  - **验证**：`CloudBackupWindowTest` 4 项全绿（23h 跳过 / 25h 备份 / mtime=0 不算最近 / `autoBack` 接线断言）；全量单测 **310 项 / 10 失败**，失败仍是既有基线（`CacheTaskStoreTest` 9、`ReadBookConfigTest` 1），无新增。冒烟（`emulator-5554`，sk2 10104→10105 覆盖升级，`firstInstallTime` 仍 `2026-09-21 10:09:56`）：模拟器未配 WebDAV，退出主界面后仍按原逻辑重写本地 `backup.zip`，无 FATAL。
-  - ⚠️ **跨设备云端分支未做 e2e**：模拟器没有 WebDAV 账号；需两台真机验证（平板备份后，手机 24h 内退出不应再上传）。
-  - **产物**：正式版 36,181,677 B ＋ 共存版 36,181,612 B；均 `10105` / `3.26.102818c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
-
-- ✅ **10104（`3.26.102420c`）—— 历史交付，未发布**（修复阅读页重建首帧「背景位图已被回收」崩溃）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `d1ab3532`（修复 + 回归锁 + 该 `.kt` 声明为 Test 输入）。
-  - **现象**：平板 TB-9707F／Android 13（共存版 `sk2`，10103）**10-23 12:15:01** 与 **10-24 12:09:37** 各崩一次，栈完全相同 —— `Canvas: trying to use a recycled bitmap` → `BitmapDrawable.draw` → `LayerDrawable.draw` → `View.drawBackground` → `ReadView.dispatchDraw(ReadView.kt:314)`。
-  - **触发时序**（app 自己的 `cache/logs/appLog-*` 逐行对齐）：阅读页 `onPause` → `BookTocLoadingActivity`／`BookInfoActivity` 走一遍 → **同一个 ReadBookActivity 新实例 `onCreate`/`onResume`（旧实例全程未 `onDestroy`）** → 新 `ReadView.init`/`onSizeChanged` 调 `ReadBookConfig.upBg()` → **72 ms 后首帧绘制即 FATAL**。
-  - **根因**：`ReadBookConfig.bg` 是**跨 Activity 实例共享的静态 Drawable**，`upBg()` 换图时把上一张位图 `post { recycle() }`。旧窗口仍把**同一个 Drawable** 挂在 `PageView.vwRoot` 背景的 `LayerDrawable` 里 → 新实例重建背景 = 对旧窗口的 use-after-free。原注释「太快执行，可能还正在被使用，延时防崩溃」只考虑同一实例内同步替换，`post` 只是把崩溃推迟一个消息。
-  - **修法**：删掉那次手动 `recycle()`，`bg = drawable` 后交给 GC（Bitmap 自 Android 8 起在 native heap 由 GC 跟踪，无需手动回收）。
-  - ⚠️ **不要"优化"回手动 recycle**：只要还有任一视图引用该共享 Drawable，程序就无权回收。回归锁 `ReadBookBackgroundBitmapGuardTest`（源码级静态断言，`upBg` 函数体内出现 `recycle()` 即 RED；**双向证伪**：注入 `drawable.bitmap?.recycle()` ⇒ RED）。
-  - **验证**：单测 **306 项 / 10 失败**（＝既有基线，无新增）；新守卫 1 项全绿。**e2e（`emulator-5554`，10103→10104 覆盖升级，`firstInstallTime` 仍 2026-09-21）**：① 重进阅读页 **10 轮 + 12 轮**；② 睡眠/唤醒 **8 轮**；③ 旋转 **8 轮**；④ 系统日夜切换 **6 轮**；⑤ 菜单切主题＋旋转＋重进交错 **25 轮 ×2（10103 与 10104 各一轮）**；⑥ 连换背景图 **6 轮**（PSS 从 260 MB **降到** 249 MB 后稳定，无单调增长）。全程 `crash` buffer 无 FATAL、进程存活。
-  - ⚠️ **模拟器上复现不出原崩溃**（10103 在模拟器同样跑完上述压力脚本未崩）：模拟器窗口/绘制时序比真机快，旧窗口在那 1 帧内已完成绘制。**修复依据是根因与栈，不是模拟器复现**；真机侧待作者验证。
-  - **产物**：正式版 36,180,918 B ＋ 共存版 36,180,817 B；均 `10104` / `3.26.102420c` / 阅读SK / arm64-v8a / apksigner 无错误。已在 `release/`（3 文件约定）。
-
-<!-- §6 仅保留最近 3 条交付；10103 / 10102 / 10101 / 10098 / 10097 / 10096 / 10094 / 10089 / 10086 / 10081 / 10076 及更早的逐版净增量见 companion/发布版更新记录.md §1。 -->
 
 ## 7. 当前机器环境与配套文档（2026-09-04 迁移后）
 
