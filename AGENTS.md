@@ -387,7 +387,7 @@ uiautomator2 / ADB
 
 ---
 
-- ✅ **10107（`3.26.102914c`）—— 当前交付，未发布**（修复：找书时换源会静默把未入架的书加入书架）：
+- ✅ **10107（`3.26.102914c`）—— 当前交付，已发布 Pre-release `v3.26.102914-10107`（2026-10-30）**（修复：找书时换源会静默把未入架的书加入书架）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `d483a173`。
   - **作者实测**：在搜索/发现页找到一本**还没入架**的书，点换源，换完这本书就出现在书架上（10106 之前就有，不是 10106 引入）。
   - **根因**：`0aa0e21e`（换源入库收口）把 `BookInfoViewModel.changeTo` 里原有的 `if (inBookshelf) { 入库 }` 守卫换成**无条件** `upsertByIdentity` + `inBookshelf = true`。搜索来的书 type 无 `notShelf` 位 → `identityKeyOf` 非空 → 试读行不参与身份收敛 → 查不到候选 → `savePlain` 插一条**无 notShelf** 的新行 = 正式入架。（该提交 message 自己写着「保留 notShelf 路径不动」，自相矛盾。）
@@ -398,6 +398,7 @@ uiautomator2 / ADB
   - ⚠️ **但「未入架书真跨源切换」这一细分场景未覆盖**：同一本书往往只在一个源上有（`[hp]信徒` 换源候选只有小原、`hp：韦斯莱家长女会做复活甲` 只有番茄），且中文关键词无法注入（`input text` 不支持 CJK、`SearchActivity` 未 exported），无法凑出“双源未入架书”。该场景依据＝真机实测 + 源码级回归锁。
   - ⚠️ **「换源时卡一下」不是本次引入**：`changeTo` 全程在 IO（`BaseViewModel.execute`），`Book.save()` 调用点也都在 IO；换源耗时来自既有的整本目录 `bookChapterDao.insert(*toc)` 与详情页目录列表重建。
   - **产物**：正式版 36,181,661 B ＋ 共存版 36,181,603 B；均 `10107` / `3.26.102914c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
+  - **发布（2026-10-30）**：`v3.26.102914-10107`（Pre-release），资产 `…_10107_arm64-v8a.apk`（36,181,661 B）＋ `…_10107_arm64-v8a_sk2-coexist.apk`（36,181,603 B）。⚠️ 本机拼代理 `gh release upload` 必 408，**清空 `https_proxy`/`http_proxy` 后直连 uploads.github.com 才成功**；而 `git push` 反过来必须走 `https_proxy=http://127.0.0.1:10808`（github.com:443 直连被断、api.github.com 直连正常）。
 
 - ✅ **10106（`3.26.102913c`）—— 历史交付，未发布**（修复书架重复书籍：换源与加架并发 / `Book.save()` 复活）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `95ce025b`（互斥 + save 收口 + 回归锁）。
