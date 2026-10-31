@@ -396,7 +396,12 @@ uiautomator2 / ADB
   - **需求（作者）**：加/删书后**立刻退出 App**，这次自动备份就丢了，问「要等多久」。事实：`Backup.autoBackupOnShelfChangeIfNeeded` 先 `delay(SHELF_CHANGE_DEBOUNCE_MS)` 再备份，且 `LocalConfig.lastShelfKeys` **只在成功后记账、启动时不补账** ⇒ 去抖窗口内杀进程＝永久丢（下次再加/删书才顺带补上）。作者定调：去抖 **3~3.5 秒**，加上传后总共 ~5~6 秒完成。
   - **改动**：`Backup.kt` `SHELF_CHANGE_DEBOUNCE_MS` 8_000L → **3_000L**（一处常量 + KDoc 说明区间与下调理由）。去抖机制保留（批量增删只备份一次），`mutex` + 拿锁后复查键集合的现有防重复逻辑未动。
   - ⚠️ **红线**：去抖不得调回 8 秒，也不得低于 3 秒（再短会把连续操作拆成多次 WebDAV 上传）。也**不要**以为缩短就消除了丢备份窗口——3 秒内杀进程仍会丢，根治需「启动时对账 `lastShelfKeys`」（作者本次未选）。回归锁 `AutoBackupOnShelfChangeGuardTest.shelfChangeDebounceStaysShort`（≤3500ms，已双向证伪：改回 8_000L ⇒ RED）。
-  - **验证**：全量单测 **322 项 / 10 失败**（＝10109 基线 321/10 ＋ 新增 1 项全绿）。⚠️ **真机回归未做**：平板 `HA1KAPWG` 的 adb 从 10110 编译后起一直掉线（`adb devices` 为空），作者选择跳过实测 ⇒ 「3 秒即备份、总 ~5~6 秒」只有源码与单测支撑，**未在设备上量延迟**。
+  - **验证**：全量单测 **322 项 / 10 失败**（＝10109 基线 321/10 ＋ 新增 1 项全绿）。
+  - **真机实测（平板 `HA1KAPWG`，10109→10111 覆盖，两包 `firstInstallTime` 均未变）**：判据＝`/sdcard/bookyuedu/backup.zip` 的 `stat` size/mtime，用主机 `date +%s` 计相对时间（**设备时钟与主机不同步，别跨设备算差**）。
+    - 加书（详情页「放入书架」）→ **+5 秒** zip 一次写到位 773,882 B；删书（详情页删除 → 「是」）→ **+7 秒** 772,606 B（采样每轮含 uiautomator dump ≈+1s 开销，实际更快）。⇒ 温态「点击到备份包写完 ≈5~6 秒」成立。
+    - ⚠️ **冷态明显更慢**：刚装完/刚启动后的头一两次，zip 是**逐步长大**的（加书：57,344→389,120→773,880 共约 16 秒；删书：49,152→772,606 共约 21 秒）。`dumpsys cpuinfo` 显示全程 CPU 仅 1.5%~12%，瓶颈不是压缩算力而是 IO/DB 冷缓存。⇒ 「总共 5~6 秒」只在热态成立，别当成恒定值。
+    - 备份内容核对：zip 17 条目、解压 2.87 MB（`config.xml` 620,362 B、`agent.zip` 85,172 B 等），**不含** `cookie.json`/`loginCache.json`（作者「登录状态」项未勾选，慢的不是 11 MB 登录缓存序列化）；`bookshelf.json` 55 本、加的那本在内、删的那本已消失；`crash` buffer FATAL 0。
+    - ⚠️ **WebDAV 上传在 zip 写完才开始**（`Backup.backup()` 顺序：写 JSON → `ZipUtils.zipFiles` → `copyBackup` → `AppWebDav.backUpWebDav` → 删临时目录），上传耗时**未计时**（release 包读不到 `app.log`，`AppLog` 不写 logcat）。
   - **产物**：正式版 36,182,934 B ＋ 共存版 36,183,026 B；均 `10111` / `3.26.103113c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定，10110 产物已删）。
 
 - ✅ **10109（`3.26.103100c`）—— 历史交付，未发布**（修复：试读后「加书架」不触发书架变动自动备份）：
