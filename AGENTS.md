@@ -82,11 +82,13 @@
 | 手机 | 小米 Redmi `23049RAD8C`（`marble`） | `72a2b362` | 2026-09-29 核实：Android 13 / HyperOS（MIUI `V140`）/ arm64-v8a |
 | 平板 | 联想 TB-9707F | `HA1KAPWG` | Android 14 |
 
-- ⚠️ **两台真机都只装了共存版 `io.legado.app.sk2`，均未装正式版 `io.legado.app.c`**（2026-09-29 核实）。故真机覆盖安装一律用 **`_（共存版）.apk`**；装正式版会变成"多出一个空 App"而不是升级。
+- ⚠️ **作者自 2026-10-30 起主用正式版 `io.legado.app.c`，共存版 `io.legado.app.sk2` 不再主用**（只保留作并行验证/备用）。因此：真机覆盖安装优先 **`legado_sk_<ver>_<code>_arm64-v8a.apk`**（正式版）；若目标机只装过共存版，装正式版会变成"多出一个空 App"而不是升级（两包签名相同但包名不同，不能互覆）。
+  - 历史：2026-09-29 核实过"两台真机都只装共存版"；目前已变化 —— **平板 `HA1KAPWG` 同时装了正式版与共存版（均 10108）**，且已用「备份→恢复」把共存版数据（书架 54 本 / 书源 11 条 / cookies 29 条 / 登录缓存 664 条）搬进正式版。
+  - 手机 `72a2b362` 的包分布未重新核实，操作前先 `adb -s 72a2b362 shell pm list packages | grep io.legado.app`。
 - ⚠️ **华为 MAR-AL00（`9HQDU19903003356`）已不在用**（2026-09-29 核实，`adb devices` 中不存在）。若日后重新接入，需先确认型号与序列号再补回本表。
 - ⚠️ **HyperOS/MIUI 手机上 `adb install` 会被 `INSTALL_FAILED_USER_RESTRICTED: Install canceled by user` 拒绝**，这是「USB 安装」开发者开关（设置 → 更多设置 → 开发者选项 → USB 安装），**必须用户在手机上手动打开**。已验证 adb 侧无法绕过：`verifier_verify_adb_installs 0`、`package_verifier_user_consent -1`、`appops set … REQUEST_INSTALL_PACKAGES allow` 三者均无效（`pm install-create` 能建会话但 commit 被 MIUI 否决）。遇到该报错**直接请用户开开关**，不要反复重试。
 - 所有 `adb` 命令必须显式带 `-s <serial>`；执行前确认目标设备，禁止裸 `adb`。
-- 真机安装统一 `adb -s <serial> install -r <_（共存版）.apk>`（同 debug 签名，覆盖升级保数据）。**校验升级成功的判据是 `firstInstallTime` 不变**（`dumpsys package <pkg>`；该值变化即"重装"而非"升级"）。
+- 真机安装统一 `adb -s <serial> install -r <..._arm64-v8a.apk>`（正式版；同 debug 签名，覆盖升级保数据）。**校验升级成功的判据是 `firstInstallTime` 不变**（`dumpsys package <pkg>`；该值变化即"重装"而非"升级"）。
 - 换签名迁移数据走 run-as tar 打包流程：导出必须用 Python subprocess 二进制流（git bash `>` 重定向会 CRLF 污染 tar）；`pm uninstall -k` 不可行（数据绑定签名）。备份与导出在仓库根的 `backup\`（被 .gitignore 忽略）。
 - 真机问题优先依据用户描述、代码和用户提供的日志排查。
 - ⚠️ 若某台真机 `run-as` 报 `package not debuggable`，那是**正确行为**（release 包），不是故障。
@@ -150,6 +152,8 @@ $versionName = '3.26.<MMddHH>c'            # 完整版本名（含 c 后缀）
 ```
 
 #### 共存版 `sk2`（2026-09-21 起恢复，与正式版并行交付）
+
+> ⚠️ **作者自 2026-10-30 起主用正式版 `io.legado.app.c`，共存版降为备用/并行验证**。共存版**仍按本节要求每次编译一并产出**，但**真机安装、日常使用与验证口径以正式版为准**；文档与发布说明不要把共存版写成主用形态。
 
 > 历史：10004–10006 曾以 `sk2` 共存版随正式版双发，10007 起停发并写明「不再提供 sk2」。**2026-09-21 作者决定恢复**，本日起每次正式编译都**必须同时**产出共存版，文档口径已同步更正。
 
@@ -389,12 +393,14 @@ uiautomator2 / ADB
 
 - ✅ **10108（`3.26.103013c`）—— 当前交付，未发布**（备份/恢复纳入书源登录状态，供正式版与共存版互通）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `dd7c31e5`。
+  - ⚠️ **这是作者自用的数据搬迁能力，不对外宣传**（作者 2026-10-30 指示）：**不写进发布说明、不提新功能、不发 Release**；只为让正式版接手共存版的存量数据（自 2026-10-30 起作者**主用正式版 `io.legado.app.c`**，共存版降为备用/并行验证）。维护时只保证「备份→恢复」链路不回归，不要把这项当成对外功能去包装。
   - **需求**：`io.legado.app.c` 与 `io.legado.app.sk2` 数据完全隔离，换包要重登每个书源。作者选择「只补登录态」方案，通道 WebDAV + 公共目录，**手动两步**（一方备份、另一方恢复），不做启动自动同步。
   - **缺口事实**：登录态不在任何 json 里 —— 在 `cookies` 表（按二级域名）与 `caches` 表的五类前缀 `loginHeader_`/`userInfo_`/`sourceVariable_`/`v_`/`infoMap_`。
   - **改动**：`Backup.kt` 新增 `cookie.json`（`appDb.cookieDao.all()`）与 `loginCache.json`（`appDb.cacheDao.sourceState()`）**并加入 `backupFileNames`**；`Restore.restoreDbData` 事务内消费二者并清内存旧值；`BackupItems` 新增 `loginState` 项目（`isSelected` 默认 true ⇒ 存量设备自动勾选）；`CookieDao.all()` / `CacheDao.sourceState()` 两个新 DAO 方法。
   - ⚠️ **红线**：三处必须成对——**落盘 + 进 `backupFileNames` + 恢复消费**。只落盘不进清单会被 `existingZipSources` 静默过滤（文件永远不进 zip）；只恢复不清内存会被 LRU 旧值遮蔽。回归锁 `LoginStateBackupTest` 4 项（已双向证伪），源码级断言须在 `app/build.gradle` 声明 `loginStateBackupGuardSources`。
   - ⚠️ **已知边界**：`userInfo_*` 用设备 `ANDROID_ID` 前 16 字节 AES 加密 ⇒ **同设备两包可互解，跨设备解不开**；导入的本地书文件本体不在备份内；同步是手动两步。
   - **验证**：全量单测 **320 项 / 10 失败**（＝旧基线 316/10 ＋ 新增 4 项全绿）。模拟器（`emulator-5554`，正式版 10098→10108、共存版 10107→10108，两个 `firstInstallTime` 均未变）：共存版备份 → logcat `cookie.json 列表大小 2 / 写入 185`、`loginCache.json 列表大小 6 / 写入 868`，zip 内两文件真实（2 条 gitee cookie + 6 条 `userInfo_httpTts:*`/`v_番茄_fq_*`）；正式版恢复 → 选择恢复项目出现「登录状态（书源 Cookie、登录信息、源变量）1 KB」→ 恢复后两表行**逐字一致**（root 拉库核对），书源就位、书架无重复、FATAL 0；「默认备份内容」10 个 checkable 全 `checked=true`。
+  - **真机实测（平板 `HA1KAPWG`，2026-10-30）**：共存版备份 → logcat `cookie.json 列表大小 29 / 写入 606833`、`loginCache.json 列表大小 664 / 写入 11126304`，产物 zip 仅 1.0 MB（`/sdcard/bookyuedu/backup.zip`，1,079,162 B；内含书架 54 本、书源 11 条，登录缓存按前缀分布 `v_` 650 条 11.05 MB / `sourceVariable_` 6 / `userInfo_` 6 / `loginHeader_` 2）；正式版设同一备份目录并长按「恢复」→ 选择恢复项目出现「登录状态 … 11.2 MB」→ 恢复日志 `cookie.json 列表大小 29`、`loginCache.json 列表大小 664`，书架出现 54 本、书源 11 条、`crash` FATAL 0；恢复后正式版的「发现→番茄」能正常拉到内容 ⇒ 搬过来的源变量可用。⚠️ 同一个平板实测到**神魔小说源 `shenmoxs.top` 已 ECONNREFUSED**（既有失效源，与本改动无关，别误当回归）。⚠️ 正式版首次选目录需存储权限，`adb shell appops set io.legado.app.c MANAGE_EXTERNAL_STORAGE allow` 可代劳（等于用户手动授权）。
   - **产物**：正式版 36,183,363 B ＋ 共存版 36,183,504 B；均 `10108` / `3.26.103013c` / 阅读SK / arm64-v8a / apksigner 0。已在 `release/`（3 文件约定）。
 
 - ✅ **10107（`3.26.102914c`）—— 历史交付，已发布 Pre-release `v3.26.102914-10107`（2026-10-30）**（修复：找书时换源会静默把未入架的书加入书架）：
