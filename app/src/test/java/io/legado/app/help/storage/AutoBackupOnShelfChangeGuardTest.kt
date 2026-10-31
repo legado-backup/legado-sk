@@ -437,4 +437,21 @@ class AutoBackupOnShelfChangeGuardTest {
         val backupAt = body.indexOf("backup(context,")
         assertTrue("提示必须晚于备份调用", backupAt in 0..<toastAt)
     }
+
+    /**
+     * ⚠️ 去抖窗口必须 ≤ 3 秒（10110 由 8 秒下调）。
+     *
+     * 窗口内进程被杀 = 这次备份**永久丢失**（`lastShelfKeys` 只在成功后记账，启动时不扫帐），
+     * 而「加完书立刻退出」是最常见的操作路径。把窗口调回 8 秒等于把这个丢失窗口拉长 4 倍。
+     */
+    @Test
+    fun shelfChangeDebounceStaysShort() {
+        val raw = Regex("""SHELF_CHANGE_DEBOUNCE_MS\s*=\s*([0-9_]+)L""")
+            .find(backupSource())
+            ?.groupValues?.get(1)
+            ?.replace("_", "")
+        assertTrue("未能定位 SHELF_CHANGE_DEBOUNCE_MS 字面量", raw != null)
+        val ms = raw!!.toLong()
+        assertTrue("去抖窗口不得大于 3000ms（当前 ${ms}ms）", ms <= 3_000L)
+    }
 }

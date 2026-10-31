@@ -131,8 +131,14 @@ object Backup {
      */
     private var pendingShelfChangeJob: Coroutine<Unit>? = null
 
-    /** 书架变动后的去抖时长：等连续增删（批量导入/删除）停下来再备份。 */
-    private const val SHELF_CHANGE_DEBOUNCE_MS = 8_000L
+    /**
+     * 书架变动后的去抖时长：等连续增删（批量导入/删除）停下来再备份。
+     *
+     * 取 2 秒（10110 由 8 秒下调）：去抖窗口内的进程被杀会让这次备份**永久丢失**
+     * （`lastShelfKeys` 只在成功后记账，启动时不补帐），而「加完书就退出」是常见操作。
+     * 窗口越短，丢的概率越低；但改回更长去抖会重新拉长这个窗口。
+     */
+    private const val SHELF_CHANGE_DEBOUNCE_MS = 2_000L
 
     // 注意：不含 "covers"。该目录由 prepareCustomCoverBackup() 在打包清单构建期间才创建，
     // 放进这里会被存在性判定（此时目录还不存在）提前跳过，导致自定义封面漏备份。
