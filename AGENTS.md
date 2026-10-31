@@ -387,11 +387,19 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10110` 递增**。
+> **下一次交付 versionCode 从 `10111` 递增**。
 
 ---
 
-- ✅ **10109（`3.26.103100c`）—— 当前交付，未发布**（修复：试读后「加书架」不触发书架变动自动备份）：
+- ✅ **10110（`3.26.103112c`）—— 当前交付，未发布**（缩短书架变动自动备份的去抖窗口 8s→2s）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `d18670da`。
+  - **需求（作者）**：加/删书后**立刻退出 App**，这次自动备份就丢了，问「要等多久」。事实：`Backup.autoBackupOnShelfChangeIfNeeded` 先 `delay(SHELF_CHANGE_DEBOUNCE_MS)` 再备份，且 `LocalConfig.lastShelfKeys` **只在成功后记账、启动时不补账** ⇒ 去抖窗口内杀进程＝永久丢（下次再加/删书才顺带补上）。作者选择「缩短去抖时间」。
+  - **改动**：`Backup.kt` `SHELF_CHANGE_DEBOUNCE_MS` 8_000L → **2_000L**（一处常量 + KDoc 说明为何不能调回）。去抖本身仍保留（批量增删只备份一次），`mutex` + 拿锁后复查键集合的现有防重复逻辑未动。
+  - ⚠️ **红线**：不得把去抖调回 8 秒；也**不要**以为去抖缩短就消除了丢备份窗口——2 秒内杀进程仍会丢，根治需「启动时对账 `lastShelfKeys`」（作者本次选了缩短，未做）。回归锁 `AutoBackupOnShelfChangeGuardTest.shelfChangeDebounceStaysShort`（≤3000ms，已双向证伪：改回 8_000L ⇒ RED，`15 tests completed, 1 failed`）。
+  - **验证**：全量单测 **322 项 / 10 失败**（＝10109 基线 321/10 ＋ 新增 1 项全绿）。⚠️ **真机回归未做**：平板 `HA1KAPWG` 的 adb 在编译后掉线（`adb devices` 为空），作者选择跳过实测直接交付 ⇒ 「2 秒即备份」只有源码与单测支撑，**未在设备上量延迟**。
+  - **产物**：正式版 36,183,021 B ＋ 共存版 36,183,108 B；均 `10110` / `3.26.103112c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
+
+- ✅ **10109（`3.26.103100c`）—— 历史交付，未发布**（修复：试读后「加书架」不触发书架变动自动备份）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `8a2e5530`。
   - **根因**：`BookInfoViewModel.saveBookAtChapter` 先把书以 `BookType.notShelf` 落库（同一 `bookUrl`）；用户在阅读页退出弹窗 / 目录页「缓存范围」/ 漫画 / 视频里加架时，原代码只做 `removeType(BookType.notShelf)` + `Book.save()` ⇒ 走 `save()` 的 **update 分支，10075 起就没有任何触发点** ⇒ 备份不跑。删书一直正常是因为 `Book.delete()` 无条件触发。
   - **「有时能」的真相**：同一退出路径上还有 `Backup.autoBack(this)`（`ReadBookActivity.onDestroy`，24 小时闸门），偶尔撞上就看起来「备份过了」。
@@ -417,18 +425,6 @@ uiautomator2 / ADB
   - **真机实测（平板 `HA1KAPWG`，2026-10-30）**：共存版备份 → logcat `cookie.json 列表大小 29 / 写入 606833`、`loginCache.json 列表大小 664 / 写入 11126304`，产物 zip 仅 1.0 MB（`/sdcard/bookyuedu/backup.zip`，1,079,162 B；内含书架 54 本、书源 11 条，登录缓存按前缀分布 `v_` 650 条 11.05 MB / `sourceVariable_` 6 / `userInfo_` 6 / `loginHeader_` 2）；正式版设同一备份目录并长按「恢复」→ 选择恢复项目出现「登录状态 … 11.2 MB」→ 恢复日志 `cookie.json 列表大小 29`、`loginCache.json 列表大小 664`，书架出现 54 本、书源 11 条、`crash` FATAL 0；恢复后正式版的「发现→番茄」能正常拉到内容 ⇒ 搬过来的源变量可用。⚠️ 同一个平板实测到**神魔小说源 `shenmoxs.top` 已 ECONNREFUSED**（既有失效源，与本改动无关，别误当回归）。⚠️ 正式版首次选目录需存储权限，`adb shell appops set io.legado.app.c MANAGE_EXTERNAL_STORAGE allow` 可代劳（等于用户手动授权）。
   - **产物**：正式版 36,183,363 B ＋ 共存版 36,183,504 B；均 `10108` / `3.26.103013c` / 阅读SK / arm64-v8a / apksigner 0。已在 `release/`（3 文件约定）。
 
-- ✅ **10107（`3.26.102914c`）—— 历史交付，已发布 Pre-release `v3.26.102914-10107`（2026-10-30）**（修复：找书时换源会静默把未入架的书加入书架）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `d483a173`。
-  - **作者实测**：在搜索/发现页找到一本**还没入架**的书，点换源，换完这本书就出现在书架上（10106 之前就有，不是 10106 引入）。
-  - **根因**：`0aa0e21e`（换源入库收口）把 `BookInfoViewModel.changeTo` 里原有的 `if (inBookshelf) { 入库 }` 守卫换成**无条件** `upsertByIdentity` + `inBookshelf = true`。搜索来的书 type 无 `notShelf` 位 → `identityKeyOf` 非空 → 试读行不参与身份收敛 → 查不到候选 → `savePlain` 插一条**无 notShelf** 的新行 = 正式入架。（该提交 message 自己写着「保留 notShelf 路径不动」，自相矛盾。）
-  - **修法**：① `changeTo` 不在架时先 `book.addType(BookType.notShelf)`（与 `BookInfoActivity.readBook()` 同写法），并**删掉** `inBookshelf = true`；② `BookUpsert.upsertLocked` 在算身份键前把 **`migrateFrom` 的 notShelf 搬到 `incoming`**，一次覆盖阅读页/漫画/音频三个换源入口（它们只传 migrateFrom）。
-  - ⚠️ **红线**：`changeTo` 不得再出现 `inBookshelf = true`；`upsertLocked` 内的 notShelf 搬运必须早于 `BookMergeRules.identityKeyOf(incoming)`。回归锁 `BookUpsertWritePathTest` 2 项 + `BookMergeRulesTest` 1 项（已双向证伪：去掉两处修复 ⇒ 2 项 RED）。
-  - **验证**：全量单测 **316 项 / 10 失败**（＝旧基线 313/10 ＋ 新增 3 项全绿）。模拟器（`emulator-5554`，sk2 10106→10107 覆盖，`firstInstallTime` 仍 `2026-09-21 10:09:56`）：未入架书详情页按钮为「放入书架」；加架后书架 2 条、无同名重复、无 FATAL；删除后回到 1 条。真机平板（`HA1KAPWG`，10106→10107 增量升级，`firstInstallTime` 仍 `2026-09-21 13:08:56`）「找书→换源」由作者实测通过。
-  - **模拟器换源实测（第二轮，已补做）**：`[hp]信徒`（书架内，来源番茄小说）→ 详情页「更换书源」→ 候选只有 `小原文学网` 一条时**应用自动应用**，详情页 3.0s 内稳定，来源变为「小原文学网」，返回书架仍是 **2 条（该书 1 条 + 星际）无重复**；未入架书（`hp：韦斯莱家长女会做复活甲`、`[hp]信徒`）走同一路径后按钮仍为「放入书架」、书架条目不变。全程 `crash` buffer **FATAL 0**。
-  - ⚠️ **但「未入架书真跨源切换」这一细分场景未覆盖**：同一本书往往只在一个源上有（`[hp]信徒` 换源候选只有小原、`hp：韦斯莱家长女会做复活甲` 只有番茄），且中文关键词无法注入（`input text` 不支持 CJK、`SearchActivity` 未 exported），无法凑出“双源未入架书”。该场景依据＝真机实测 + 源码级回归锁。
-  - ⚠️ **「换源时卡一下」不是本次引入**：`changeTo` 全程在 IO（`BaseViewModel.execute`），`Book.save()` 调用点也都在 IO；换源耗时来自既有的整本目录 `bookChapterDao.insert(*toc)` 与详情页目录列表重建。
-  - **产物**：正式版 36,181,661 B ＋ 共存版 36,181,603 B；均 `10107` / `3.26.102914c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
-  - **发布（2026-10-30）**：`v3.26.102914-10107`（Pre-release），资产 `…_10107_arm64-v8a.apk`（36,181,661 B）＋ `…_10107_arm64-v8a_sk2-coexist.apk`（36,181,603 B）。⚠️ 本机拼代理 `gh release upload` 必 408，**清空 `https_proxy`/`http_proxy` 后直连 uploads.github.com 才成功**；而 `git push` 反过来必须走 `https_proxy=http://127.0.0.1:10808`（github.com:443 直连被断、api.github.com 直连正常）。
 
 ## 7. 当前机器环境与配套文档（2026-09-04 迁移后）
 
