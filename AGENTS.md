@@ -387,9 +387,18 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10109` 递增**。
+> **下一次交付 versionCode 从 `10110` 递增**。
 
 ---
+
+- ✅ **10109（`3.26.103100c`）—— 当前交付，未发布**（修复：试读后「加书架」不触发书架变动自动备份）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `8a2e5530`。
+  - **根因**：`BookInfoViewModel.saveBookAtChapter` 先把书以 `BookType.notShelf` 落库（同一 `bookUrl`）；用户在阅读页退出弹窗 / 目录页「缓存范围」/ 漫画 / 视频里加架时，原代码只做 `removeType(BookType.notShelf)` + `Book.save()` ⇒ 走 `save()` 的 **update 分支，10075 起就没有任何触发点** ⇒ 备份不跑。删书一直正常是因为 `Book.delete()` 无条件触发。
+  - **「有时能」的真相**：同一退出路径上还有 `Backup.autoBack(this)`（`ReadBookActivity.onDestroy`，24 小时闸门），偶尔撞上就看起来「备份过了」。
+  - **修法**：新增唯一入口 `Book.addToShelf()`（`data/entities/Book.kt`）= `removeType(BookType.notShelf)` + `save()` + `Backup.autoBackupOnShelfChangeIfNeeded(appCtx)`；四处入口（`ReadBookActivity`、`BaseReadBookActivity`、`ReadMangaActivity`、`VideoPlayerActivity`）改调它。
+  - ⚠️ **红线**：这四处不得再各自写 `removeType(BookType.notShelf)` + `save()`；也不得把触发行搬进 `Book.save()` 的两个出口——`save()` 被朗读每章（`SourceAudioReadAloudService`）与本地导入循环（`LocalBook`）高频调用，每次全表扫 `bookDao.all`。回归锁 `AutoBackupOnShelfChangeGuardTest` 13 项（已双向证伪：摘掉触发行 / 退回旧写法均变红）。
+  - **验证**：全量单测 **321 项 / 10 失败**（＝基线 320/10 ＋ 新增 1 项全绿；10 项为既有 `CacheTaskStoreTest` 9 项 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`）。⚠️ **模拟器运行时回归未完成**：本机雷电 adb 本次完全不可用——仅 `Ld9BoxHeadless.exe` 监听 `2222`（手工发 adb `CNXN` 无回应，非 adbd），无 5554/5555；quitall 冷启 3 次、`adb start-server` 后启动、整栈重启（含 kill `Ld9BoxSVC.exe`）均无效，`adb devices` 恒空。结论依据＝源码级回归锁 + 双向证伪，运行时待真机验证。
+  - **产物**：正式版 36,182,925 B ＋ 共存版 36,182,999 B；均 `10109` / `3.26.103100c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
 
 - ✅ **10108（`3.26.103013c`）—— 当前交付，未发布**（备份/恢复纳入书源登录状态，供正式版与共存版互通）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `dd7c31e5`。
@@ -415,16 +424,6 @@ uiautomator2 / ADB
   - ⚠️ **「换源时卡一下」不是本次引入**：`changeTo` 全程在 IO（`BaseViewModel.execute`），`Book.save()` 调用点也都在 IO；换源耗时来自既有的整本目录 `bookChapterDao.insert(*toc)` 与详情页目录列表重建。
   - **产物**：正式版 36,181,661 B ＋ 共存版 36,181,603 B；均 `10107` / `3.26.102914c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
   - **发布（2026-10-30）**：`v3.26.102914-10107`（Pre-release），资产 `…_10107_arm64-v8a.apk`（36,181,661 B）＋ `…_10107_arm64-v8a_sk2-coexist.apk`（36,181,603 B）。⚠️ 本机拼代理 `gh release upload` 必 408，**清空 `https_proxy`/`http_proxy` 后直连 uploads.github.com 才成功**；而 `git push` 反过来必须走 `https_proxy=http://127.0.0.1:10808`（github.com:443 直连被断、api.github.com 直连正常）。
-
-- ✅ **10106（`3.26.102913c`）—— 历史交付，未发布**（修复书架重复书籍：换源与加架并发 / `Book.save()` 复活）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `95ce025b`（互斥 + save 收口 + 回归锁）。
-  - **触发原因（作者提供）**：在找书里**换源**、并在换源前后**加入书架**，书架出现两本同名同作者、书源不同的重复书。两层结构原因：① `BookUpsert.upsertByIdentity` 的「查候选 → 选 keep → 写入」全在事务外**无互斥**，两路并发各自查到「无同书」就各自 insert；② `Book.save()` 的不存在分支**裸 insert**，换源/合并 `delete(stray)`/`delete(src)` 之后拿陈旧 `bookUrl` 调 `save()` 会把已并掉的记录**复活**。
-  - **修法**：`BookUpsert` 加唯一可重入锁 `writeLock`，`upsertByIdentity`/`merge` 入口只委派 `upsertLocked`/`mergeLocked`（查与写同锁）；`Book.save()` 不存在分支改走 `BookUpsert.upsertByIdentity(this)`，自动备份触发统一归 `savePlain()` 末尾。
-  - ⚠️ **红线**：入口函数体内不得出现 `getBooks(`/`savePlain(`；`save()` 不得改回 `appDb.bookDao.insert(this)`。回归锁 `BookUpsertWritePathTest` 3 项（已双向证伪：回退修复 ⇒ 2 项 RED）。
-  - **验证**：单测 **313 项 / 10 失败**（＝旧基线 310/10 ＋ 新增 3 项全绿）；冒烟（`emulator-5554`，sk2 10105→10106 覆盖升级，`firstInstallTime` 仍 `2026-09-21 10:09:56`）书架/详情页/阅读页进退出正常、「合并重复书籍」提示无重复、`crash` 0 条。
-  - ⚠️ **核心场景未做模拟器 e2e**（模拟器只有本地书、无在线书源，release 包不可 `run-as` 查 DB）：结论依据是代码结构 + 回归锁，**真机待作者验证**。
-  - **产物**：正式版 36,181,523 B ＋ 共存版 36,181,230 B；均 `10106` / `3.26.102913c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
-
 
 ## 7. 当前机器环境与配套文档（2026-09-04 迁移后）
 
