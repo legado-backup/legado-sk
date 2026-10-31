@@ -397,10 +397,15 @@ uiautomator2 / ADB
   - **「有时能」的真相**：同一退出路径上还有 `Backup.autoBack(this)`（`ReadBookActivity.onDestroy`，24 小时闸门），偶尔撞上就看起来「备份过了」。
   - **修法**：新增唯一入口 `Book.addToShelf()`（`data/entities/Book.kt`）= `removeType(BookType.notShelf)` + `save()` + `Backup.autoBackupOnShelfChangeIfNeeded(appCtx)`；四处入口（`ReadBookActivity`、`BaseReadBookActivity`、`ReadMangaActivity`、`VideoPlayerActivity`）改调它。
   - ⚠️ **红线**：这四处不得再各自写 `removeType(BookType.notShelf)` + `save()`；也不得把触发行搬进 `Book.save()` 的两个出口——`save()` 被朗读每章（`SourceAudioReadAloudService`）与本地导入循环（`LocalBook`）高频调用，每次全表扫 `bookDao.all`。回归锁 `AutoBackupOnShelfChangeGuardTest` 13 项（已双向证伪：摘掉触发行 / 退回旧写法均变红）。
-  - **验证**：全量单测 **321 项 / 10 失败**（＝基线 320/10 ＋ 新增 1 项全绿；10 项为既有 `CacheTaskStoreTest` 9 项 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`）。⚠️ **模拟器运行时回归未完成**：本机雷电 adb 本次完全不可用——仅 `Ld9BoxHeadless.exe` 监听 `2222`（手工发 adb `CNXN` 无回应，非 adbd），无 5554/5555；quitall 冷启 3 次、`adb start-server` 后启动、整栈重启（含 kill `Ld9BoxSVC.exe`）均无效，`adb devices` 恒空。结论依据＝源码级回归锁 + 双向证伪，运行时待真机验证。
+  - **验证**：全量单测 **321 项 / 10 失败**（＝基线 320/10 ＋ 新增 1 项全绿；10 项为既有 `CacheTaskStoreTest` 9 项 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`）。⚠️ **模拟器不可用**：本机雷电 adb 完全连不上——仅 `Ld9BoxHeadless.exe` 监听 `2222`（手工发 adb `CNXN` 无回应，非 adbd），无 5554/5555；quitall 冷启 3 次、`adb start-server` 后启动、整栈重启（含 kill `Ld9BoxSVC.exe`）均无效，`adb devices` 恒空。**改在真机平板 `HA1KAPWG` 回归（2026-10-31）**：
+    - 覆盖安装 10108→10109，两个包 `firstInstallTime` 均未变（`c`=`2026-10-30 14:00:50`、`sk2`=`2026-09-21 13:08:56`）；备份目录 `/sdcard/bookyuedu`（`仅保留最新备份` 开 ⇒ 文件名固定 `backup.zip`），此时「书架变动时自动备份」开关实际为**关**（首轮加书无备份正是这个原因，**排查时先看开关**）。
+    - 打开开关后逐路径实测，判据＝`/sdcard/bookyuedu/backup.zip` 的 `stat` mtime 精确到秒 + 拉包比对 `bookshelf.json`：**发现页**试读→退出弹窗「确定」(09:42:39/09:51:17)、**搜索**（搜索结果→选源→详情页）「放入书架」(09:46:43) 与试读后退出「确定」(09:51:17)、**详情页**「放入书架」(09:44:05)、**删书**（详情页删除 09:44:35、书架多选删除 09:52:16）全部触发；zip 内 `bookshelf.json` 含新书、删除后回落。`crash` buffer **FATAL 0**。
+    - ⚠️ **幂等跳过实测**：把库里已有「同名+同作者+同 mediaType」的书再加一次（`无限神职`/`忘记穿马甲`，搜索来源「含遇見」）时 zip **不更新**——`ShelfIdentity` 键集合未变，属设计行为（日志有「书架身份键集合未变化」分支）。
+    - ⚠️ **但同一次操作观察到书架出现第 2 条同名同作者记录**，且「合并重复书籍」能识别为「1 组重复共 2 本」⇒ 该次加书走了 `savePlain` 插入而非 `BookUpsert` 合并，**与本次改动无关，尚未定位**（下次动 `BookUpsert`/`BookMergeRules` 前先查：候选查询为何未命中）。
+    - ⚠️ 每次自动备份都会同时上传 WebDAV（作者用坚果云），实测 6 次 ≈ 4.7 MB，**回归时不要反复加删书**。
   - **产物**：正式版 36,182,925 B ＋ 共存版 36,182,999 B；均 `10109` / `3.26.103100c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
 
-- ✅ **10108（`3.26.103013c`）—— 当前交付，未发布**（备份/恢复纳入书源登录状态，供正式版与共存版互通）：
+- ✅ **10108（`3.26.103013c`）—— 历史交付，未发布**（备份/恢复纳入书源登录状态，供正式版与共存版互通）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `dd7c31e5`。
   - ⚠️ **这是作者自用的数据搬迁能力，不对外宣传**（作者 2026-10-30 指示）：**不写进发布说明、不提新功能、不发 Release**；只为让正式版接手共存版的存量数据（自 2026-10-30 起作者**主用正式版 `io.legado.app.c`**，共存版降为备用/并行验证）。维护时只保证「备份→恢复」链路不回归，不要把这项当成对外功能去包装。
   - **需求**：`io.legado.app.c` 与 `io.legado.app.sk2` 数据完全隔离，换包要重登每个书源。作者选择「只补登录态」方案，通道 WebDAV + 公共目录，**手动两步**（一方备份、另一方恢复），不做启动自动同步。
