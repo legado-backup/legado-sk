@@ -22,7 +22,6 @@ import com.bumptech.glide.request.target.Target.SIZE_ORIGINAL
 import com.bumptech.glide.util.FixedPreloadSizeProvider
 import io.legado.app.R
 import io.legado.app.base.VMBaseActivity
-import io.legado.app.constant.BookType
 import io.legado.app.constant.EventBus
 import io.legado.app.constant.PageAnim
 import io.legado.app.data.entities.Book
@@ -895,8 +894,7 @@ class ReadMangaActivity : VMBaseActivity<ActivityMangaBinding, ReadMangaViewMode
             alert(title = getString(R.string.add_to_bookshelf)) {
                 setMessage(getString(R.string.check_add_bookshelf, book.name))
                 okButton {
-                    ReadManga.book?.removeType(BookType.notShelf)
-                    ReadManga.book?.save()
+                    ReadManga.book?.addToShelf()
                     ReadManga.inBookshelf = true
                     setResult(RESULT_OK)
                     super.finish()

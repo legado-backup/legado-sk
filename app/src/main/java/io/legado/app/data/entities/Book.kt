@@ -20,6 +20,7 @@ import io.legado.app.help.book.getFolderNameNoCache
 import io.legado.app.help.book.isEpub
 import io.legado.app.help.book.isImage
 import io.legado.app.help.book.isLocal
+import io.legado.app.help.book.removeType
 import io.legado.app.help.book.simulatedTotalChapterNum
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.ReadBookConfig
@@ -503,6 +504,22 @@ data class Book(
             // 自动备份的“加架”触发因此改由 `BookUpsert.savePlain()` 末尾统一完成。
             BookUpsert.upsertByIdentity(this)
         }
+    }
+
+    /**
+     * 把**已在库的试读记录**正式加入书架（唯一入口）。
+     *
+     * ⚠️ 不能写成 `removeType(BookType.notShelf) + save()`：从详情页“开始阅读”时
+     * `BookInfoViewModel.saveBookAtChapter` 已按同一 `bookUrl` 落库（带 notShelf 位），
+     * 加架时的 `save()` 会走「已存在」分支只做 update，**不触发**书架变动检查
+     * ——「退出阅读选加入书架后没有自动备份」就是这条路径（10109 修）。
+     */
+    fun addToShelf() {
+        removeType(BookType.notShelf)
+        save()
+        // 加架 = 书架**增加**；与 `delete()` 对称。不放在 `save()` 里是因为 `save()` 被朗读
+        // 每章、本地书导入循环高频调用，每次都会扫一遍 `bookDao.all`。
+        Backup.autoBackupOnShelfChangeIfNeeded(appCtx)
     }
 
     fun delete() {

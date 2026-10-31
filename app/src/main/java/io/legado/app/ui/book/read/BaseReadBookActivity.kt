@@ -16,7 +16,6 @@ import androidx.core.view.updateLayoutParams
 import io.legado.app.R
 import io.legado.app.base.VMBaseActivity
 import io.legado.app.constant.AppConst.charsets
-import io.legado.app.constant.BookType
 import io.legado.app.constant.PageAnim
 import io.legado.app.constant.PreferKey
 import io.legado.app.databinding.ActivityBookReadBinding
@@ -285,8 +284,7 @@ abstract class BaseReadBookActivity :
                             if (it.isEmpty()) book.totalChapterNum else it.toInt()
                         }
                         if (!ReadBook.inBookshelf) {
-                            book.removeType(BookType.notShelf)
-                            book.save()
+                            book.addToShelf()
                             ReadBook.inBookshelf = true
                             SourceCallBack.callBackBook(
                                 SourceCallBack.ADD_BOOK_SHELF,

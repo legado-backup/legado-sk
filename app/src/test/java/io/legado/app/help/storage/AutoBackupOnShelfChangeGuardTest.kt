@@ -169,12 +169,16 @@ class AutoBackupOnShelfChangeGuardTest {
      * 全库 200+ 处 `bookDao` 写点绝大多数只改进度/目录/分组，且 `Restore` 也**直接**写
      * `bookDao` —— 在 DAO 层拦截会把恢复流程自身卷进来（见 autoBackupSuspendedWhileRestoring）。
      *
-     * 采用的接缝是 `Book.save()` / `Book.delete()` / `BookShortcutHelp.delete()` /
-     * `BookUpsert.savePlain()` / `BookUpsert.merge()`，而不是 DAO 或 UI 入口。
+     * 采用的接缝是 `Book.addToShelf()` / `Book.save()` / `Book.delete()` /
+     * `BookShortcutHelp.delete()` / `BookUpsert.savePlain()` / `BookUpsert.merge()`，而不是 DAO 或 UI 入口。
      *
      * ⚠️ **10076 教训**：10075 的版本只断言了 `Book.kt` 里**存在**那行字符串，
      * 却漏了 `BookUpsert` 这条收口，于是「加入书架」主力路径全部漏触发而测试全绿。
      * 现在加架侧的断言改由 [shelfWriteFunnelsAllTriggerBackup] 覆盖 `BookUpsert`。
+     *
+     * ⚠️ **10109 教训**：`Book.save()` 自身的 update 出口仍**不**触发（它被朗读每章、
+     * 本地导入循环高频调用），试读书加架必须走 [trialBookAddToShelfFunnelTriggersBackup]
+     * 锁定的 `Book.addToShelf()`。
      */
     @Test
     fun triggerIsOnDomainMethodsNotDao() {
@@ -253,6 +257,42 @@ class AutoBackupOnShelfChangeGuardTest {
             val callAt = savePlainBody.indexOf(call, savePlainTxEnd)
             val bodyEnd = savePlainBody.lastIndexOf("return target")
             assertTrue("savePlain 的触发应位于事务块之后、return 之前", callAt in savePlainTxEnd..<bodyEnd)
+        }
+    }
+
+    /**
+     * ⚠️ **试读记录加架必须走 `Book.addToShelf()`**（10109 新增，本缺陷的回归锁）。
+     *
+     * 从详情页「开始阅读」时 `BookInfoViewModel.saveBookAtChapter` 已按**同一 `bookUrl`**
+     * 落库（带 notShelf 位），所以加架时的 `save()` 会走「已存在」分支、只做 update，
+     * **不触发**书架变动检查 —— 这是「从阅读页退出选加入书架后没有自动备份」的根因。
+     * 阅读端 4 个加架入口必须全部走唯一入口，不得各自 `removeType(notShelf) + save()`。
+     */
+    @Test
+    fun trialBookAddToShelfFunnelTriggersBackup() {
+        val call = "Backup.autoBackupOnShelfChangeIfNeeded(appCtx)"
+        val book = executableOnly(moduleSource("src/main/java/io/legado/app/data/entities/Book.kt"))
+
+        val body = book
+            .substringAfter("fun addToShelf()")
+            .substringBefore("fun delete()")
+        assertTrue("未能定位 Book.addToShelf() 函数体（应位于 save() 与 delete() 之间）", body.isNotBlank())
+        assertTrue("Book.addToShelf() 必须摘掉 notShelf 位", body.contains("BookType.notShelf"))
+        assertTrue("Book.addToShelf() 必须落库", body.contains("save()"))
+        assertTrue("Book.addToShelf() 必须触发书架变动检查", body.contains(call))
+
+        listOf(
+            "src/main/java/io/legado/app/ui/book/read/ReadBookActivity.kt",
+            "src/main/java/io/legado/app/ui/book/read/BaseReadBookActivity.kt",
+            "src/main/java/io/legado/app/ui/book/manga/ReadMangaActivity.kt",
+            "src/main/java/io/legado/app/ui/video/VideoPlayerActivity.kt",
+        ).forEach { path ->
+            val source = executableOnly(moduleSource(path))
+            assertTrue(
+                "$path 不得自行 removeType(BookType.notShelf)：那是未接触发的 save() 路径",
+                !source.contains("removeType(BookType.notShelf)")
+            )
+            assertTrue("$path 必须调用 addToShelf()", source.contains("addToShelf()"))
         }
     }
 

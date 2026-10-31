@@ -1257,8 +1257,7 @@ class VideoPlayerActivity : VMBaseActivity<ActivityVideoPlayerBinding, VideoPlay
             alert(title = getString(R.string.add_to_bookshelf)) {
                 setMessage(getString(R.string.check_add_bookshelf, book.name))
                 okButton {
-                    VideoPlay.book?.removeType(BookType.notShelf)
-                    VideoPlay.book?.save()
+                    VideoPlay.book?.addToShelf()
                     VideoPlay.inBookshelf = true
                     setResult(RESULT_OK)
                     callBackBookEnd()
