@@ -1,5 +1,6 @@
 package io.legado.app.service
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -43,7 +44,7 @@ class ReadAloudChapterTimerGuardTest {
     private fun nextChapterBody(): String = slice(
         serviceSource(),
         "open fun nextChapter(syncView: Boolean = false)",
-        "private fun chapterAdvancedAloud()"
+        "fun chapterAdvancedAloud()"
     )
 
     /**
@@ -55,13 +56,13 @@ class ReadAloudChapterTimerGuardTest {
     fun naturalAdvanceConsumesChapterAndStopsBeforeAdvancing() {
         val body = nextChapterBody()
 
-        val guard = body.indexOf("!syncView && timeChapter > 0")
+        val guard = body.indexOf("decideChapterConsumption(")
         val decrement = body.indexOf("timeChapter--")
         val zeroCheck = body.indexOf("timeChapter == 0")
         val stop = body.indexOf("ReadAloud.stop(this)")
         val advance = body.indexOf("advanceToNextChapter(syncView)")
 
-        assertTrue("未找到 !syncView 守卫（用户显式跳章不得消耗章节定时）", guard >= 0)
+        assertTrue("未找到 decideChapterConsumption 判定（用户显式跳章不得消耗章节定时）", guard >= 0)
         assertTrue("未找到 timeChapter-- 递减", decrement >= 0)
         assertTrue("递减必须发生在 !syncView 守卫之内", decrement > guard)
         assertTrue(
@@ -84,11 +85,11 @@ class ReadAloudChapterTimerGuardTest {
         val decrement = body.indexOf("timeChapter--")
         assertTrue("未找到 consumesChapter 判定", consumeDecl >= 0)
         assertTrue("未找到 timeChapter-- 递减", decrement > consumeDecl)
-        // 递减只能出现在 consumesChapter 分支内：判定式本身必须含 !syncView 与「本章有音频」。
+        // 递减只能出现在 consumesChapter 分支内：判定式必须把 syncView 与「本章有音频」都交给纯函数。
         val declaration = body.substring(consumeDecl, body.indexOf('\n', consumeDecl))
         assertTrue(
-            "额度判定必须同时含 !syncView 与 chapterAdvancedAloud()（实际：$declaration）",
-            declaration.contains("!syncView && timeChapter > 0 && chapterAdvancedAloud()")
+            "额度判定必须同时含 syncView 与 chapterAdvancedAloud()（实际：$declaration）",
+            declaration.contains("decideChapterConsumption(syncView, timeChapter, chapterAdvancedAloud())")
         )
         assertTrue(
             "timeChapter-- 必须写在 if (consumesChapter) 之内，不得无条件递减",
@@ -140,7 +141,16 @@ class ReadAloudChapterTimerGuardTest {
         val source = serviceSource()
         assertTrue(
             "未找到 chapterAdvancedAloud 的比较逻辑",
-            source.contains("private fun chapterAdvancedAloud(): Boolean = readAloudNumber > chapterStartNumber")
+            source.contains("open fun chapterAdvancedAloud(): Boolean = readAloudNumber > chapterStartNumber")
+        )
+        // 书源音频没有段落游标（readAloudNumber 恒 0），必须由子类按播放进度判定，否则定时永不扣额度。
+        val audio = executableOnly(
+            moduleSource("src/main/java/io/legado/app/service/SourceAudioReadAloudService.kt")
+        )
+        assertTrue(
+            "书源音频必须重写 chapterAdvancedAloud() 按播放进度判定",
+            audio.contains("override fun chapterAdvancedAloud(): Boolean") &&
+                audio.contains("maxPlayedPosition - chapterPlaybackStart >= AUDIO_CHAPTER_ADVANCE_MIN_MS")
         )
         val prepare = slice(
             source,
@@ -151,6 +161,30 @@ class ReadAloudChapterTimerGuardTest {
             "本章播放起点必须在章节准备时记录（chapterStartNumber = readAloudNumber）",
             prepare.contains("paragraphStartPos = resolveParagraphStartPos(chapter)") &&
                 prepare.contains("chapterStartNumber = readAloudNumber")
+        )
+    }
+
+    /**
+     * ⚠️ 额度判定是纯函数，必须直接断言**行为**：源码字面量断言挡不住「语义退化」
+     * （10097 的 `BackupScopeDecisionTest` 就是为此建立：文本全对但语义已坏）。
+     */
+    @Test
+    fun consumptionDecisionFollowsRealBehaviour() {
+        assertTrue(
+            "自然读完且本章推出过音频才消耗",
+            decideChapterConsumption(syncView = false, timeChapter = 5, chapterAdvanced = true)
+        )
+        assertFalse(
+            "用户显式跳章不消耗",
+            decideChapterConsumption(syncView = true, timeChapter = 5, chapterAdvanced = true)
+        )
+        assertFalse(
+            "额度已用完不消耗",
+            decideChapterConsumption(syncView = false, timeChapter = 0, chapterAdvanced = true)
+        )
+        assertFalse(
+            "本章未推出音频不消耗",
+            decideChapterConsumption(syncView = false, timeChapter = 5, chapterAdvanced = false)
         )
     }
 

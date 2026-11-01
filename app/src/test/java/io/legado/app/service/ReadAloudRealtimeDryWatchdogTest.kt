@@ -92,20 +92,58 @@ class ReadAloudRealtimeDryWatchdogTest {
         )
         val body = armBody()
         assertTrue("必须按秒换算后派发：$body", body.contains("REALTIME_DRY_STALL_GRACE_SECONDS * 1000L"))
-        assertTrue("必须确认播放器没在出声：$body", body.contains("if (wavPlayer.isPlaying) return"))
-        assertTrue("必须是当前段才处理：$body", body.contains("index != nowSpeak"))
+        assertTrue(
+            "必须交给纯函数判定「确实没在出声」（当前段/在跑/未暂停/播放器停着）：$body",
+            body.contains("shouldTreatAsDry(index, nowSpeak, isRun, pause, wavPlayer.isPlaying)")
+        )
         assertTrue(
             "必须走既有重试链（重建客户端）：$body",
             body.contains("handleSpeakError(\"tts realtime dry timeout\", retryWithReinit = true)")
         )
     }
 
-    /** 同一单元只武装一次（避免重复重试导致跳段），且播放/暂停/复位处必须撤销。 */
+    /**
+     * 干涸判据是纯函数，直接断言行为（源码字面量断言挡不住语义退化）。
+     * 尤其：重建引擎/重试期间不能把「还没开始出声」当成第二次失败而跳段。
+     */
+    @Test
+    fun dryDecisionFollowsRealBehaviour() {
+        assertTrue(
+            "当前段、在跑、未暂停、播放器停着⇒判干涸",
+            shouldTreatAsDry(index = 54, nowSpeak = 54, isRun = true, paused = false, playerPlaying = false)
+        )
+        assertFalse(
+            "不是当前段不得判干涸",
+            shouldTreatAsDry(54, 55, isRun = true, paused = false, playerPlaying = false)
+        )
+        assertFalse(
+            "已暂停不得判干涸",
+            shouldTreatAsDry(54, 54, isRun = true, paused = true, playerPlaying = false)
+        )
+        assertFalse(
+            "未在朗读不得判干涸",
+            shouldTreatAsDry(54, 54, isRun = false, paused = false, playerPlaying = false)
+        )
+        assertFalse(
+            "播放器仍在出声不属干涸",
+            shouldTreatAsDry(54, 54, isRun = true, paused = false, playerPlaying = true)
+        )
+    }
+
+    /** 每次进场都重新计时（残留的旧截止时刻会提前误判），且播放/暂停/复位/重试处必须撤销。 */
     @Test
     fun dryWatchdogIsPerUnitAndCancelledWherePlaybackStarts() {
         val service = serviceSource()
         val arm = armBody()
-        assertTrue("同一单元不得重复武装：$arm", arm.contains("if (realtimeDryIndex == index) return"))
+        assertTrue(
+            "武装前必须先撤销旧回调（同一段重入需续期）：$arm",
+            arm.indexOf("cancelRealtimeDryWatchdog()") in 0 until arm.indexOf("postDelayed")
+        )
+        assertTrue(
+            "重试链开始时必须撤销，否则重建引擎期会被当成第二次失败而跳段",
+            slice(service, "private fun handleSpeakError(message: String, retryWithReinit: Boolean) {", "val paragraphKey")
+                .contains("cancelRealtimeDryWatchdog()")
+        )
         val speakUnit = slice(
             service,
             "private fun speakRealtimeUnit(index: Int, text: String) {",
@@ -129,7 +167,8 @@ class ReadAloudRealtimeDryWatchdogTest {
         val service = serviceSource()
         assertTrue(
             "看门狗派发必须用有效超时",
-            service.contains("AppConfig.ttsRealtimeSegmentTimeoutSeconds * 1000L")
+            service.contains("val timeoutSeconds = AppConfig.ttsRealtimeSegmentTimeoutSeconds") &&
+                service.contains("timeoutSeconds * 1000L")
         )
         assertFalse(
             "看门狗不得再用原始设置值",

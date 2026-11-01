@@ -100,6 +100,18 @@ import splitties.systemservices.wifiManager
 import kotlin.math.abs
 
 /**
+ * 章节定时额度判定（纯函数，便于直接断言行为而不是断言源码文本）。
+ *
+ * 只有引擎自然读完（syncView=false）且本章真的推出过音频（[chapterAdvanced]）才消耗一章：
+ * 用户显式跳章不消耗；额度已用完不消耗；空章/朗读列表为空等「没出声就换章」不消耗。
+ */
+internal fun decideChapterConsumption(
+    syncView: Boolean,
+    timeChapter: Int,
+    chapterAdvanced: Boolean
+): Boolean = !syncView && timeChapter > 0 && chapterAdvanced
+
+/**
  * 朗读服务
  */
 abstract class BaseReadAloudService : BaseService(),
@@ -1898,12 +1910,14 @@ abstract class BaseReadAloudService : BaseService(),
         // 按章节定时：只有引擎自然读完（syncView=false）且本章真的推出过音频才消耗一章；
         // 用户显式跳章（对话框/通知栏/线控，syncView=true）不消耗；
         // 空章或朗读列表为空的换章同样不消耗，否则用户会白掉一章额度。
-        val consumesChapter = !syncView && timeChapter > 0 && chapterAdvancedAloud()
+        val consumesChapter = decideChapterConsumption(syncView, timeChapter, chapterAdvancedAloud())
         if (!syncView && timeChapter > 0 && !consumesChapter) {
             AppLog.putDebug("[朗读] 本章无音频推进，不消耗章节定时额度（剩余 $timeChapter 章）")
         }
         if (consumesChapter) {
             timeChapter--
+            // 立刻把本章起点推到当前位置：同一章被连续判两次时不会重复扣额度。
+            chapterStartNumber = readAloudNumber
             postEvent(EventBus.READ_ALOUD_DS_CHAPTER, timeChapter)
             upReadAloudNotification()
             if (timeChapter == 0) {
@@ -1928,8 +1942,9 @@ abstract class BaseReadAloudService : BaseService(),
     /**
      * 本章是否真的推进过朗读。空章、朗读列表为空、合成失败时 [readAloudNumber]
      * 仍停在章首（[chapterStartNumber]），这种「没出声就换章」不计入章节定时。
+     * 书源音频没有段落游标，由子类改成按播放进度判定。
      */
-    private fun chapterAdvancedAloud(): Boolean = readAloudNumber > chapterStartNumber
+    protected open fun chapterAdvancedAloud(): Boolean = readAloudNumber > chapterStartNumber
 
     /**
      * 统一推进到上一章。
@@ -2038,6 +2053,10 @@ abstract class BaseReadAloudService : BaseService(),
             this@BaseReadAloudService.toLast = toLast
             val startPageIndex = if (toLast) chapter.lastIndex else 0
             if (!prepareReadAloudChapter(chapter, startPageIndex, 0)) {
+                // 静默 return 会让服务活着、额度已扣、却永远没有声音；必须暴露原因。
+                stopReadAloudOnInvalidPosition(
+                    "Read aloud chapter not prepared, index=$targetIndex"
+                )
                 return@execute
             }
             upTtsProgress(readAloudNumber + 1)

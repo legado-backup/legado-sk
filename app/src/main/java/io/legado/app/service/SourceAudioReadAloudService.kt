@@ -29,6 +29,9 @@ import kotlinx.coroutines.withContext
 class SourceAudioReadAloudService : BaseReadAloudService(), Player.Listener {
 
     companion object {
+        /** 书源音频章节定时：本章播放进度越过起点多少毫秒才算「真的推出过音频」。 */
+        private const val AUDIO_CHAPTER_ADVANCE_MIN_MS = 1_000
+
         @Volatile
         var currentMediaUrl: String? = null
             private set
@@ -45,6 +48,10 @@ class SourceAudioReadAloudService : BaseReadAloudService(), Player.Listener {
     private var lastMappedParagraph = -1
     private var lastPersistedAt = 0L
 
+    /** 本章音频的起点与已播到的最大位置（毫秒），用于章节定时判定。 */
+    private var chapterPlaybackStart = -1
+    private var maxPlayedPosition = -1
+
     /**
      * 书源音频自己记住的当前章节。章节对象来自书源目录（BookChapter），
      * 章节身份只认统一朗读会话的 currentChapterIndex（BookChapter.index），
@@ -54,6 +61,17 @@ class SourceAudioReadAloudService : BaseReadAloudService(), Player.Listener {
 
     // 书源音频的章节身份建立在 BookChapter.index 上，正文 TextChapter 未就绪也能启动
     override val sessionChapterCanStartWithoutText: Boolean get() = true
+
+    /**
+     * 书源音频没有段落游标：`readAloudNumber` 只在字幕时间映射可用时才有值，
+     * 无字幕/正文未就绪时它恒为 0，父类判定会让章节定时永不消耗。
+     * 音频会话以实际播放进度判定——本章播过至少 1 秒才认为「推出过音频」。
+     */
+    override fun chapterAdvancedAloud(): Boolean =
+        super.chapterAdvancedAloud() || (
+            chapterPlaybackStart >= 0 &&
+                maxPlayedPosition - chapterPlaybackStart >= AUDIO_CHAPTER_ADVANCE_MIN_MS
+            )
 
     override fun play() {
         super.play()
@@ -72,6 +90,8 @@ class SourceAudioReadAloudService : BaseReadAloudService(), Player.Listener {
         progressJob?.cancel()
         player.stop()
         layoutBinding = null
+        chapterPlaybackStart = -1
+        maxPlayedPosition = -1
         upReadAloudLoading(true)
         resolveJob = lifecycleScope.launch {
             val result = runCatching {
@@ -121,7 +141,10 @@ class SourceAudioReadAloudService : BaseReadAloudService(), Player.Listener {
                 player.setPlaybackSpeed(book.getPlaySpeed().coerceIn(0.5f, 3.0f))
                 player.playWhenReady = true
                 player.prepare()
-                player.seekTo(resolveStartPosition(book, chapter.index).toLong())
+                val startPosition = resolveStartPosition(book, chapter.index)
+                player.seekTo(startPosition.toLong())
+                chapterPlaybackStart = startPosition
+                maxPlayedPosition = startPosition
             }.onFailure(::failPlayback)
         }
     }
@@ -292,6 +315,7 @@ class SourceAudioReadAloudService : BaseReadAloudService(), Player.Listener {
             while (isActive) {
                 val duration = player.duration
                 val position = player.currentPosition.coerceAtLeast(0)
+                if (position > maxPlayedPosition) maxPlayedPosition = position.toInt()
                 if (duration > 0 && duration <= Int.MAX_VALUE) {
                     publishTimeProgress(position.toInt(), duration)
                     syncTextPosition(position.toInt())

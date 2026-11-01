@@ -1113,24 +1113,37 @@ class HttpReadAloudService : BaseReadAloudService(),
 
     override fun pauseReadAloud(abandonFocus: Boolean) {
         super.pauseReadAloud(abandonFocus)
+        // playIndexJob 不碰播放器，留在同步段：否则排队前还能再发一次位置事件。
+        playIndexJob?.cancel()
         // ExoPlayer 绑定主线程。合成失败等回调在 IO 线程发起暂停，直接调用会抛
         // IllegalStateException 并被吞掉 —— 表现为「焦点已放弃、声音还在放」，
-        // 缓冲播完后彻底静音且额度未用完。必须切主线程，且不吞异常。
+        // 缓冲播完后彻底静音且额度未用完。必须切主线程；异常要留痕，但不能杀进程。
         lifecycleScope.launch {
-            playIndexJob?.cancel()
-            exoPlayer.pause()
+            // 排队期间可能已被 resume 覆盖，此时不得再把声音关掉。
+            if (!pause) return@launch
+            guardPlayer("暂停播放器失败") { exoPlayer.pause() }
         }
     }
 
     override fun resumeReadAloud() {
         super.resumeReadAloud()
         lifecycleScope.launch {
+            if (pause) return@launch
             if (pageChanged) {
                 play()
             } else {
-                exoPlayer.play()
-                upPlayPos()
+                guardPlayer("恢复播放器失败") { exoPlayer.play() }
+                if (!pause) upPlayPos()
             }
+        }
+    }
+
+    /** 播放器只能在主线程访问；出错必须留痕（便于定位），但不能把异常抛到协程外杀进程。 */
+    private fun guardPlayer(action: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: IllegalStateException) {
+            AppLog.put("[朗读] $action", e, module = LogModule.READ_ALOUD)
         }
     }
 

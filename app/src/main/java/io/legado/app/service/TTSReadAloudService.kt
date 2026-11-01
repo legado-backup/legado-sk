@@ -51,6 +51,18 @@ import java.io.File
  */
 private const val REALTIME_DRY_STALL_GRACE_SECONDS = 15
 
+/**
+ * 看门狗到点时的干涸判据（纯函数，JVM 单测可直接断言行为）：
+ * 仍是当前单元、服务在跑、没暂停、且播放器确实没在出声。
+ */
+internal fun shouldTreatAsDry(
+    index: Int,
+    nowSpeak: Int,
+    isRun: Boolean,
+    paused: Boolean,
+    playerPlaying: Boolean
+): Boolean = index == nowSpeak && isRun && !paused && !playerPlaying
+
 class TTSReadAloudService : BaseReadAloudService() {
 
     private var textToSpeech: TextToSpeech? = null
@@ -118,12 +130,13 @@ class TTSReadAloudService : BaseReadAloudService() {
         val tempFile: File,
         val key: TtsCacheStore.UnitKey,
         val watchdog: Runnable,
+        /** 派发时生效的超时秒数：日志必须与真实截止时间一致（开关可能被中途改）。 */
+        val timeoutSeconds: Int,
     )
 
     private val realtimePending = linkedMapOf<Int, RealtimeSynthesis>()
 
-    /** 队列干涸看门狗已武装的单元；-1 表示未武装。同一单元只武装一次，避免重复重试造成跳段。 */
-    private var realtimeDryIndex = -1
+    /** 队列干涸看门狗的待命回调；null 表示未武装。 */
     private var realtimeDryWatchdog: Runnable? = null
 
     private fun clearRealtimePending() {
@@ -166,6 +179,7 @@ class TTSReadAloudService : BaseReadAloudService() {
             }
         }.onFailure { AppLog.put("TTS 缓存清扫登记失败: ${it.localizedMessage}", it) }
         super.onDestroy()
+        cancelRealtimeDryWatchdog()
         clearTTS(forgetVoice = true)
         runCatching { wavPlayer.release() }
     }
@@ -415,7 +429,9 @@ class TTSReadAloudService : BaseReadAloudService() {
         val tts = textToSpeech ?: return
         val tempFile = File(wavDir, "rt_${speakGeneration}_$index.wav")
         val watchdog = Runnable { onRealtimeSynthesisTimeout(index) }
-        realtimePending[index] = RealtimeSynthesis(index, tempFile, key, watchdog)
+        // 取一次，保证「实际截止时间」与「日志里的秒数」一定一致。
+        val timeoutSeconds = AppConfig.ttsRealtimeSegmentTimeoutSeconds
+        realtimePending[index] = RealtimeSynthesis(index, tempFile, key, watchdog, timeoutSeconds)
         val result = tts.runCatching {
             synthesizeToFile(text, Bundle(), tempFile, utteranceId(index))
         }.getOrElse {
@@ -432,9 +448,11 @@ class TTSReadAloudService : BaseReadAloudService() {
         } else {
             predictHandler.postDelayed(
                 watchdog,
-                AppConfig.ttsRealtimeSegmentTimeoutSeconds * 1000L,
+                timeoutSeconds * 1000L,
             )
-            TtsCacheLog.debug("实时缓存合成派发 单元:$index 在途:${realtimePending.size}")
+            TtsCacheLog.debug(
+                "实时缓存合成派发 单元:$index 超时:${timeoutSeconds}s 在途:${realtimePending.size}"
+            )
         }
     }
 
@@ -443,10 +461,9 @@ class TTSReadAloudService : BaseReadAloudService() {
         val record = synchronized(realtimePending) { realtimePending.remove(index) } ?: return
         record.tempFile.delete()
         TtsCacheLog.put(
-            "实时缓存合成超时(${AppConfig.ttsRealtimeSegmentTimeoutSeconds}s) 单元:$index"
+            "实时缓存合成超时(${record.timeoutSeconds}s) 单元:$index"
         )
-        if (index == nowSpeak && isRun && !pause) {
-            handleSpeakError("tts realtime synthesize timeout", retryWithReinit = true)
+        if (index == nowSpeak && isRun && !pause) {            handleSpeakError("tts realtime synthesize timeout", retryWithReinit = true)
         }
         // 预取段超时通常意味着引擎已挂死：当前段的看门狗随后也会触发并重init
     }
@@ -459,14 +476,14 @@ class TTSReadAloudService : BaseReadAloudService() {
      */
     private fun armRealtimeDryWatchdog(index: Int) {
         if (!AppConfig.ttsCacheFastRetry) return
-        if (realtimeDryIndex == index) return
+        // 一律重新计时：同一单元可能因重试/重入再次进场，残留的旧截止时刻会提前误判干涸。
+        // 重复重试次数由 [handleSpeakError] 的 retryParagraphKey 限制，不需要第二套去重。
         cancelRealtimeDryWatchdog()
-        realtimeDryIndex = index
         val watchdog = Runnable {
             realtimeDryWatchdog = null
-            realtimeDryIndex = -1
-            if (index != nowSpeak || !isRun || pause) return@Runnable
-            if (wavPlayer.isPlaying) return@Runnable
+            if (!shouldTreatAsDry(index, nowSpeak, isRun, pause, wavPlayer.isPlaying)) {
+                return@Runnable
+            }
             TtsCacheLog.put(
                 "实时缓存队列干涸(${REALTIME_DRY_STALL_GRACE_SECONDS}s)未出声，按引擎挂死重试 单元:$index"
             )
@@ -479,7 +496,6 @@ class TTSReadAloudService : BaseReadAloudService() {
     private fun cancelRealtimeDryWatchdog() {
         realtimeDryWatchdog?.let { predictHandler.removeCallbacks(it) }
         realtimeDryWatchdog = null
-        realtimeDryIndex = -1
     }
 
     /** 合成完成：提交进缓存；当前单元直接播，预取单元落库等翻句时命中。 */
@@ -964,6 +980,8 @@ class TTSReadAloudService : BaseReadAloudService() {
 
     @Synchronized
     private fun handleSpeakError(message: String, retryWithReinit: Boolean) {
+        // 重试/重建引擎期间不存在「引擎吞了请求」的情形，不能让它被当成第二次失败而跳段。
+        cancelRealtimeDryWatchdog()
         val paragraphKey = "$nowSpeak:$readAloudNumber:$paragraphStartPos"
         if (retryParagraphKey != paragraphKey) {
             AppLog.putDebug("$message, retry current paragraph")

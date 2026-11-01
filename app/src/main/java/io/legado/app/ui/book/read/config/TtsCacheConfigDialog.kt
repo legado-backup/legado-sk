@@ -55,6 +55,13 @@ class TtsCacheConfigDialog : BasePrefDialogFragment() {
             upPrefetchCountSummary()
             upSegmentTimeoutSummary()
             upHttpThreadCountSummary()
+            findPreference<Preference>(PreferKey.ttsCacheFastRetry)?.apply {
+                setOnPreferenceChangeListener { _, _ ->
+                    // 持久化在本回调之后，推到下一轮消息再刷新摘要，否则会读到旧值。
+                    view?.post { upSegmentTimeoutSummary() }
+                    true
+                }
+            }
         }
 
         override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
