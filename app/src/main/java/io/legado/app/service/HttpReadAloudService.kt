@@ -118,6 +118,12 @@ class HttpReadAloudService : BaseReadAloudService(),
     private var httpRequestJob: Job? = null
     private var playErrorNo = 0
 
+    private companion object {
+        /** 单段合成最多尝试次数（超时/忙时重试，避免停在半路）。 */
+        const val SCRIPT_SYNTHESIS_ATTEMPTS = 3
+        const val SCRIPT_SYNTHESIS_RETRY_DELAY_MS = 1200L
+    }
+
     // 上一句实测的单字符音频时长（毫秒）：流式播放拿不到总时长时，
     // 作为句内进度轮询的步长估计（页间分段 OFF 时的被动预测兜底）
     @Volatile
@@ -372,9 +378,16 @@ class HttpReadAloudService : BaseReadAloudService(),
                     ensureActive()
                     if (index < nowSpeak) return@forEachIndexed
                     val items = runCatching {
-                        prepareScriptMediaItems(scriptEngine, storyboard, index, content)
+                        prepareScriptMediaItemsWithRetry(scriptEngine, storyboard, index, content)
                     }.onFailure {
-                        if (it !is CancellationException) pauseReadAloud()
+                        if (it is CancellationException) return@execute
+                        AppLog.put(
+                            "[朗读] 第${index + 1}段合成失败，已暂停朗读\n${it.localizedMessage}",
+                            it,
+                            module = LogModule.READ_ALOUD
+                        )
+                        toastOnUi(getString(R.string.read_aloud_synthesis_failed, index + 1))
+                        pauseReadAloud()
                         return@execute
                     }.getOrThrow()
                     if (!firstMediaItemsAdded) {
@@ -466,6 +479,37 @@ class HttpReadAloudService : BaseReadAloudService(),
     }
 
     /** 朗读单元 → 播放媒体项列表：多角色分镜命中时按子段拆分，否则整段一项。 */
+    /**
+     * 单段合成带有限重试：MultiTTS 等本地转发引擎偶发超时/忙，一次失败就放弃会让朗读
+     * 停在半路（缓冲播完后静音）。重试仍失败才向上抛，由调用方明示并暂停。
+     */
+    private suspend fun prepareScriptMediaItemsWithRetry(
+        engine: TtsEngineSetting,
+        storyboard: ChapterStoryboard?,
+        index: Int,
+        content: String
+    ): List<PreparedMediaItem> {
+        var lastError: Throwable? = null
+        repeat(SCRIPT_SYNTHESIS_ATTEMPTS) { attempt ->
+            try {
+                return prepareScriptMediaItems(engine, storyboard, index, content)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                lastError = e
+                AppLog.put(
+                    "[朗读] 第${index + 1}段合成失败（第${attempt + 1}/${SCRIPT_SYNTHESIS_ATTEMPTS}次）\n${e.localizedMessage}",
+                    e,
+                    module = LogModule.READ_ALOUD
+                )
+                if (attempt < SCRIPT_SYNTHESIS_ATTEMPTS - 1) {
+                    delay(SCRIPT_SYNTHESIS_RETRY_DELAY_MS)
+                }
+            }
+        }
+        throw lastError ?: NoStackTraceException("朗读合成失败")
+    }
+
     private suspend fun prepareScriptMediaItems(
         engine: TtsEngineSetting,
         storyboard: ChapterStoryboard?,
@@ -1069,7 +1113,10 @@ class HttpReadAloudService : BaseReadAloudService(),
 
     override fun pauseReadAloud(abandonFocus: Boolean) {
         super.pauseReadAloud(abandonFocus)
-        kotlin.runCatching {
+        // ExoPlayer 绑定主线程。合成失败等回调在 IO 线程发起暂停，直接调用会抛
+        // IllegalStateException 并被吞掉 —— 表现为「焦点已放弃、声音还在放」，
+        // 缓冲播完后彻底静音且额度未用完。必须切主线程，且不吞异常。
+        lifecycleScope.launch {
             playIndexJob?.cancel()
             exoPlayer.pause()
         }
@@ -1077,7 +1124,7 @@ class HttpReadAloudService : BaseReadAloudService(),
 
     override fun resumeReadAloud() {
         super.resumeReadAloud()
-        kotlin.runCatching {
+        lifecycleScope.launch {
             if (pageChanged) {
                 play()
             } else {

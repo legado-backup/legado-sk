@@ -229,6 +229,7 @@
     <string name="read_aloud_pause">朗读暂停</string>
     <string name="read_aloud_timer">正在朗读（还剩 %d 分钟）</string>
     <string name="read_aloud_timer_chapter">正在朗读（含本章还剩 %d 章）</string>
+    <string name="read_aloud_synthesis_failed">第 %d 段语音合成失败，已暂停朗读</string>
     <string name="timer_chapter_current">听完本章</string>
     <string name="timer_chapter_m">听完 %d 章（含本章）</string>
     <string name="timer_chapter">还剩 %d 章</string>

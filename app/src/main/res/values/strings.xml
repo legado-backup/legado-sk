@@ -230,6 +230,7 @@
     <string name="read_aloud_pause">Speak Paused</string>
     <string name="read_aloud_timer">Speaking(%d min left)</string>
     <string name="read_aloud_timer_chapter">Speaking(%d chapters left, current incl.)</string>
+    <string name="read_aloud_synthesis_failed">Speech synthesis failed on paragraph %d, reading paused</string>
     <string name="timer_chapter_current">After this chapter</string>
     <string name="timer_chapter_m">After %d chapters (current incl.)</string>
     <string name="timer_chapter">%d chapters left</string>
