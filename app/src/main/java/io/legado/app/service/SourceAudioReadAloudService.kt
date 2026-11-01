@@ -26,12 +26,22 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** 书源音频章节定时：本章播放进度越过起点多少毫秒才算「真的推出过音频」。 */
+internal const val AUDIO_CHAPTER_ADVANCE_MIN_MS = 1_000
+
+/**
+ * 书源音频的「本章推出过音频」判定（纯函数，JVM 单测直接断言行为）。
+ * 无字幕时 `readAloudNumber` 恒 0，只能靠播放进度：`startMs < 0` 表示本章尚未开始播放。
+ */
+internal fun audioChapterAdvanced(
+    startMs: Int,
+    maxPlayedMs: Int,
+    minMs: Int = AUDIO_CHAPTER_ADVANCE_MIN_MS
+): Boolean = startMs >= 0 && maxPlayedMs - startMs >= minMs
+
 class SourceAudioReadAloudService : BaseReadAloudService(), Player.Listener {
 
     companion object {
-        /** 书源音频章节定时：本章播放进度越过起点多少毫秒才算「真的推出过音频」。 */
-        private const val AUDIO_CHAPTER_ADVANCE_MIN_MS = 1_000
-
         @Volatile
         var currentMediaUrl: String? = null
             private set
@@ -65,13 +75,16 @@ class SourceAudioReadAloudService : BaseReadAloudService(), Player.Listener {
     /**
      * 书源音频没有段落游标：`readAloudNumber` 只在字幕时间映射可用时才有值，
      * 无字幕/正文未就绪时它恒为 0，父类判定会让章节定时永不消耗。
-     * 音频会话以实际播放进度判定——本章播过至少 1 秒才认为「推出过音频」。
+     * 音频会话以实际播放进度判定。
      */
     override fun chapterAdvancedAloud(): Boolean =
-        super.chapterAdvancedAloud() || (
-            chapterPlaybackStart >= 0 &&
-                maxPlayedPosition - chapterPlaybackStart >= AUDIO_CHAPTER_ADVANCE_MIN_MS
-            )
+        super.chapterAdvancedAloud() || audioChapterAdvanced(chapterPlaybackStart, maxPlayedPosition)
+
+    /** 额度已结算：清掉本条的播放进度基准，同一章再判一次不会重复扣。 */
+    override fun onChapterConsumed() {
+        chapterPlaybackStart = -1
+        maxPlayedPosition = -1
+    }
 
     override fun play() {
         super.play()

@@ -149,8 +149,14 @@ class ReadAloudChapterTimerGuardTest {
         )
         assertTrue(
             "书源音频必须重写 chapterAdvancedAloud() 按播放进度判定",
-            audio.contains("override fun chapterAdvancedAloud(): Boolean") &&
-                audio.contains("maxPlayedPosition - chapterPlaybackStart >= AUDIO_CHAPTER_ADVANCE_MIN_MS")
+            audio.contains("override fun chapterAdvancedAloud(): Boolean =") &&
+                audio.contains("audioChapterAdvanced(chapterPlaybackStart, maxPlayedPosition)")
+        )
+        assertTrue(
+            "额度结算后必须复位音频进度基准（onChapterConsumed），否则同章连判会双扣",
+            audio.contains("override fun onChapterConsumed()") &&
+                audio.contains("chapterPlaybackStart = -1") &&
+                audio.contains("maxPlayedPosition = -1")
         )
         val prepare = slice(
             source,
@@ -434,5 +440,18 @@ class ReadAloudChapterTimerGuardTest {
                 assertTrue("$path 缺少字符串 $name", strings.contains("name=\"$name\""))
             }
         }
+    }
+
+    /**
+     * ⚠️ 书源音频的推进判定是纯函数，必须直接断言**行为**：
+     * 源码字面量断言拦不住「把阈值改破」这类回归（改大即等于回到「永不消耗」）。
+     */
+    @Test
+    fun audioChapterAdvanceFollowsRealBehaviour() {
+        assertTrue("本章已开始且播过 1 秒就算推出过音频", audioChapterAdvanced(0, 1_000))
+        assertFalse("不足 1 秒不算", audioChapterAdvanced(0, 999))
+        assertFalse("本章尚未开始播放（startMs<0）不算", audioChapterAdvanced(-1, 60_000))
+        assertTrue("从章中续听也计入（按相对进度）", audioChapterAdvanced(120_000, 121_000))
+        assertTrue("默认阈值必须仍是 1 秒", AUDIO_CHAPTER_ADVANCE_MIN_MS == 1_000)
     }
 }

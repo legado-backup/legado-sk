@@ -1339,8 +1339,19 @@ abstract class BaseReadAloudService : BaseService(),
         }
     }
 
-    protected fun stopReadAloudOnInvalidPosition(message: String) {
+    protected fun stopReadAloudOnInvalidPosition(
+        message: String,
+        refundChapter: Boolean = false,
+        toast: Boolean = false
+    ) {
         AppLog.putDebug(message)
+        // 切章提前失败时额度已扣：必须先归还，否则会留下「还剩 N 章」却永远无声。
+        if (refundChapter && timeChapter > 0) {
+            timeChapter++
+            postEvent(EventBus.READ_ALOUD_DS_CHAPTER, timeChapter)
+            upReadAloudNotification()
+        }
+        AppLog.put(message, toast = toast)
         lifecycleScope.launch(Main) {
             stopSelf()
         }
@@ -1918,6 +1929,7 @@ abstract class BaseReadAloudService : BaseService(),
             timeChapter--
             // 立刻把本章起点推到当前位置：同一章被连续判两次时不会重复扣额度。
             chapterStartNumber = readAloudNumber
+            onChapterConsumed()
             postEvent(EventBus.READ_ALOUD_DS_CHAPTER, timeChapter)
             upReadAloudNotification()
             if (timeChapter == 0) {
@@ -1945,6 +1957,12 @@ abstract class BaseReadAloudService : BaseService(),
      * 书源音频没有段落游标，由子类改成按播放进度判定。
      */
     protected open fun chapterAdvancedAloud(): Boolean = readAloudNumber > chapterStartNumber
+
+    /**
+     * 额度已结算的收口：子类若用自己的一套起点（如书源音频的播放进度）必须在这里复位，
+     * 否则同一章被连续判两次时会重复扣一章。默认无状态可清。
+     */
+    protected open fun onChapterConsumed() = Unit
 
     /**
      * 统一推进到上一章。
@@ -2055,7 +2073,9 @@ abstract class BaseReadAloudService : BaseService(),
             if (!prepareReadAloudChapter(chapter, startPageIndex, 0)) {
                 // 静默 return 会让服务活着、额度已扣、却永远没有声音；必须暴露原因。
                 stopReadAloudOnInvalidPosition(
-                    "Read aloud chapter not prepared, index=$targetIndex"
+                    "Read aloud chapter not prepared, index=$targetIndex",
+                    refundChapter = true,
+                    toast = true
                 )
                 return@execute
             }

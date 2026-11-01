@@ -463,7 +463,8 @@ class TTSReadAloudService : BaseReadAloudService() {
         TtsCacheLog.put(
             "实时缓存合成超时(${record.timeoutSeconds}s) 单元:$index"
         )
-        if (index == nowSpeak && isRun && !pause) {            handleSpeakError("tts realtime synthesize timeout", retryWithReinit = true)
+        if (index == nowSpeak && isRun && !pause) {
+            handleSpeakError("tts realtime synthesize timeout", retryWithReinit = true)
         }
         // 预取段超时通常意味着引擎已挂死：当前段的看门狗随后也会触发并重init
     }
@@ -724,6 +725,7 @@ class TTSReadAloudService : BaseReadAloudService() {
 
     @Synchronized
     private fun clearTTS(forgetVoice: Boolean = false) {
+        // 重建引擎的单一收口：干涸看门狗由 resetWavPlayback() 撤销，本函数不必再显式撤。
         activeUtteranceId = null
         queuedUntilIndex = -1
         speakGeneration++
