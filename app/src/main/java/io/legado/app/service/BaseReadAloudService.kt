@@ -202,6 +202,13 @@ abstract class BaseReadAloudService : BaseService(),
     internal var contentList = emptyList<String>()
     internal var nowSpeak: Int = 0
     internal var readAloudNumber: Int = 0
+
+    /**
+     * 本章实际播放起点（[prepareReadAloudChapter] 记录）。
+     * 换章时与 [readAloudNumber] 比较，判断本章是否真的推出过音频：
+     * 空章、朗读列表为空、合成失败时两者相等，这种换章不得消耗章节定时额度。
+     */
+    private var chapterStartNumber: Int = 0
     internal var textChapter: TextChapter? = null
     internal var pageIndex = 0
 
@@ -1217,6 +1224,7 @@ abstract class BaseReadAloudService : BaseService(),
             nowSpeak = contentList.lastIndex.coerceAtLeast(0)
         }
         paragraphStartPos = resolveParagraphStartPos(chapter)
+        chapterStartNumber = readAloudNumber
         AppLog.putDebug(
             "[朗读] 章节准备 ch:${chapter.chapter.index} page:$safePageIndex startPos:$startPos " +
                 "number:$readAloudNumber nowSpeak:$nowSpeak offset:$paragraphStartPos " +
@@ -1887,9 +1895,14 @@ abstract class BaseReadAloudService : BaseService(),
      */
     open fun nextChapter(syncView: Boolean = false) {
         ReadBook.upReadTime()
-        // 按章节定时：只有引擎自然读完（syncView=false）才消耗一章；
-        // 用户显式跳章（对话框/通知栏/线控，syncView=true）既不消耗也不清零。
-        if (!syncView && timeChapter > 0) {
+        // 按章节定时：只有引擎自然读完（syncView=false）且本章真的推出过音频才消耗一章；
+        // 用户显式跳章（对话框/通知栏/线控，syncView=true）不消耗；
+        // 空章或朗读列表为空的换章同样不消耗，否则用户会白掉一章额度。
+        val consumesChapter = !syncView && timeChapter > 0 && chapterAdvancedAloud()
+        if (!syncView && timeChapter > 0 && !consumesChapter) {
+            AppLog.putDebug("[朗读] 本章无音频推进，不消耗章节定时额度（剩余 $timeChapter 章）")
+        }
+        if (consumesChapter) {
             timeChapter--
             postEvent(EventBus.READ_ALOUD_DS_CHAPTER, timeChapter)
             upReadAloudNotification()
@@ -1902,8 +1915,21 @@ abstract class BaseReadAloudService : BaseService(),
         }
         AppLog.putDebug("${currentReadAloudChapterTitle()} 朗读结束跳转下一章并朗读")
         resumeReadAloudInternal()
-        advanceToNextChapter(syncView)
+        val advanced = advanceToNextChapter(syncView)
+        if (!advanced && consumesChapter) {
+            // 跨章推进失败：归还刚消耗的额度，并把停止原因显式暴露出来，不留下「还剩 N 章」却永远无声。
+            timeChapter++
+            postEvent(EventBus.READ_ALOUD_DS_CHAPTER, timeChapter)
+            upReadAloudNotification()
+            AppLog.put("[朗读] 跨章推进失败，已归还本章定时额度（剩余 $timeChapter 章）", toast = true)
+        }
     }
+
+    /**
+     * 本章是否真的推进过朗读。空章、朗读列表为空、合成失败时 [readAloudNumber]
+     * 仍停在章首（[chapterStartNumber]），这种「没出声就换章」不计入章节定时。
+     */
+    private fun chapterAdvancedAloud(): Boolean = readAloudNumber > chapterStartNumber
 
     /**
      * 统一推进到上一章。
@@ -1937,16 +1963,17 @@ abstract class BaseReadAloudService : BaseService(),
 
     /**
      * 统一推进到下一章，语义同 [advanceToPrevChapter]。
+     * @return 是否真的切到了下一章；false 表示已就地停止（调用方需据此归还定时额度）。
      */
-    private fun advanceToNextChapter(syncView: Boolean = false) {
+    private fun advanceToNextChapter(syncView: Boolean = false): Boolean {
         val followDisplay = syncView || ReadBook.durChapterIndex == currentChapterIndex
         if (!followDisplay) {
             switchReadAloudChapterKeepingViewByOffset(1, toLast = false)
         } else if (sessionChapterCanStartWithoutText) {
             val nextTextReady = ReadBook.nextTextChapter?.isCompleted == true
             if (!ReadBook.moveToNextChapter(true, fromReadAloud = true)) {
-                stopSelf()
-                return
+                stopReadAloudOnInvalidPosition("Read aloud can not move to next chapter")
+                return false
             }
             if (!nextTextReady) {
                 currentChapterIndex = ReadBook.durChapterIndex
@@ -1955,9 +1982,11 @@ abstract class BaseReadAloudService : BaseService(),
             }
         } else {
             if (!ReadBook.moveToNextChapter(true, fromReadAloud = true)) {
-                stopSelf()
+                stopReadAloudOnInvalidPosition("Read aloud can not move to next chapter")
+                return false
             }
         }
+        return true
     }
 
     private fun currentReadAloudChapterTitle(): String? {
@@ -1978,7 +2007,9 @@ abstract class BaseReadAloudService : BaseService(),
     private fun switchReadAloudChapterKeepingView(targetIndex: Int, toLast: Boolean) {
         if (targetIndex !in 0 until ReadBook.simulatedChapterSize) {
             this.toLast = false
-            stopSelf()
+            stopReadAloudOnInvalidPosition(
+                "Read aloud detach switch target out of range, index=$targetIndex"
+            )
             return
         }
         AppLog.putDebug(

@@ -43,7 +43,7 @@ class ReadAloudChapterTimerGuardTest {
     private fun nextChapterBody(): String = slice(
         serviceSource(),
         "open fun nextChapter(syncView: Boolean = false)",
-        "advanceToNextChapter(syncView)"
+        "private fun chapterAdvancedAloud()"
     )
 
     /**
@@ -79,15 +79,91 @@ class ReadAloudChapterTimerGuardTest {
     /** 用户显式跳章（syncView=true，对话框/通知栏/线控）不消耗定时。 */
     @Test
     fun userExplicitChapterJumpDoesNotConsume() {
-        val lines = nextChapterBody().lines()
-        val decrementIndex = lines.indexOfFirst { it == "timeChapter--" }
-        assertTrue("未找到 timeChapter-- 语句", decrementIndex > 0)
-        // 锚定递减语句的**上一行**就是守卫：这样断言不会因为“文件里存在某字符串”而误绿
+        val body = nextChapterBody()
+        val consumeDecl = body.indexOf("val consumesChapter")
+        val decrement = body.indexOf("timeChapter--")
+        assertTrue("未找到 consumesChapter 判定", consumeDecl >= 0)
+        assertTrue("未找到 timeChapter-- 递减", decrement > consumeDecl)
+        // 递减只能出现在 consumesChapter 分支内：判定式本身必须含 !syncView 与「本章有音频」。
+        val declaration = body.substring(consumeDecl, body.indexOf('\n', consumeDecl))
         assertTrue(
-            "递减必须紧跟在 !syncView 守卫行之后（上一行实际为：" +
-                "${lines[decrementIndex - 1]}）",
-            lines[decrementIndex - 1].contains("!syncView && timeChapter > 0")
+            "额度判定必须同时含 !syncView 与 chapterAdvancedAloud()（实际：$declaration）",
+            declaration.contains("!syncView && timeChapter > 0 && chapterAdvancedAloud()")
         )
+        assertTrue(
+            "timeChapter-- 必须写在 if (consumesChapter) 之内，不得无条件递减",
+            body.indexOf("if (consumesChapter)") in 0 until decrement
+        )
+    }
+
+    /**
+     * ⚠️ 跨章推进失败必须**归还**刚消耗的额度，否则会出现「还剩 N 章」却永远无声。
+     * 同时失败点不得再裸 `stopSelf()`：必须走 `stopReadAloudOnInvalidPosition` 留下原因。
+     */
+    @Test
+    fun crossChapterFailureReturnsBudgetAndExposesReason() {
+        val body = nextChapterBody()
+        val advance = body.indexOf("val advanced = advanceToNextChapter(syncView)")
+        val rollback = body.indexOf("timeChapter++")
+        assertTrue("advanceToNextChapter 的返回值必须被接收（未找到 val advanced = ...）", advance >= 0)
+        assertTrue("推进失败后必须 timeChapter++ 归还额度", rollback > advance)
+        assertTrue(
+            "归还额度后必须重新派发 READ_ALOUD_DS_CHAPTER，否则界面仍显示少一章",
+            body.substring(rollback).contains("READ_ALOUD_DS_CHAPTER")
+        )
+        assertTrue(
+            "归还必须同时 AppLog.put(..., toast = true)，让用户看到停止原因",
+            body.substring(rollback).contains("AppLog.put(") &&
+                body.substring(rollback).contains("toast = true")
+        )
+
+        val advanceFn = slice(
+            serviceSource(),
+            "private fun advanceToNextChapter(syncView: Boolean = false): Boolean",
+            "return true"
+        )
+        assertTrue("advanceToNextChapter 必须返回 Boolean", advanceFn.contains(": Boolean"))
+        assertTrue(
+            "跨章失败必须用 stopReadAloudOnInvalidPosition 暴露原因，不得裸 stopSelf()",
+            advanceFn.contains("stopReadAloudOnInvalidPosition") &&
+                !advanceFn.contains("stopSelf()")
+        )
+        assertTrue("失败分支必须 return false", advanceFn.contains("return false"))
+    }
+
+    /**
+     * ⚠️ 「无音频推进」不得消耗章节额度：空章 / 朗读列表为空时 `readAloudNumber`
+     * 仍等于章首起点，比较基准必须来自 `prepareReadAloudChapter` 记录的本章起点。
+     */
+    @Test
+    fun noAudioAdvanceDoesNotConsumeChapter() {
+        val source = serviceSource()
+        assertTrue(
+            "未找到 chapterAdvancedAloud 的比较逻辑",
+            source.contains("private fun chapterAdvancedAloud(): Boolean = readAloudNumber > chapterStartNumber")
+        )
+        val prepare = slice(
+            source,
+            "private fun prepareReadAloudChapter(",
+            "chapterStartNumber = readAloudNumber"
+        )
+        assertTrue(
+            "本章播放起点必须在章节准备时记录（chapterStartNumber = readAloudNumber）",
+            prepare.contains("paragraphStartPos = resolveParagraphStartPos(chapter)") &&
+                prepare.contains("chapterStartNumber = readAloudNumber")
+        )
+    }
+
+    /** 定时文案必须明确「含本章」，否则章中设定 N 章会被理解成 N 整章。 */
+    @Test
+    fun chapterTimerStringsStateCurrentChapterIncluded() {
+        for ((path, expected) in listOf(
+            "src/main/res/values-zh/strings.xml" to "含本章",
+            "src/main/res/values/strings.xml" to "current incl."
+        )) {
+            val strings = moduleSource(path)
+            assertTrue("$path 的 timer_chapter_m 缺少「含本章」说明", strings.contains(expected))
+        }
     }
 
     /**

@@ -229,9 +229,9 @@
     <string name="set_timer">Timer</string>
     <string name="read_aloud_pause">Speak Paused</string>
     <string name="read_aloud_timer">Speaking(%d min left)</string>
-    <string name="read_aloud_timer_chapter">Speaking(%d chapters left)</string>
+    <string name="read_aloud_timer_chapter">Speaking(%d chapters left, current incl.)</string>
     <string name="timer_chapter_current">After this chapter</string>
-    <string name="timer_chapter_m">After %d chapters</string>
+    <string name="timer_chapter_m">After %d chapters (current incl.)</string>
     <string name="timer_chapter">%d chapters left</string>
     <string name="read_aloud_backstage_confirm_title">Continue speech in background?</string>
     <string name="read_aloud_backstage_confirm_msg">Speech is still running. Continue in background, or stop speech and exit? The floating controller stays visible outside the app only when "Float on desktop" is enabled.</string>
