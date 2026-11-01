@@ -296,6 +296,9 @@ Activity 页面标题和正文标题不是“弹窗头”，不得为追求无�
   - ⚠️ **`白`/`黑` 预设 `backgroundImgPath` 本来就是 `None`（纯色预设），`bg=None` 不是空壳判据**；判别空壳要看 `primaryColor` 是否为预设真值（`#ffecebe9`/`#ff333333`），带背景的是 `MD3·墨墟`/`MD3·琴女`（`background.jpg`）。
 
 - **听书按章节定时的额度守卫（10112 起）**：额度只在「引擎自然读完本章且本章真的推出过音频」时消耗——判定式必须保持 `!syncView && timeChapter > 0 && chapterAdvancedAloud()`，**不得退回无条件递减**；跨章推进失败必须 `timeChapter++` 归还并重新派发 `READ_ALOUD_DS_CHAPTER`，失败点不得再写裸 `stopSelf()`。回归锁 `ReadAloudChapterTimerGuardTest`。⚠️ 语义事实：档位把**当前章算第 1 章**，已由文案「含本章」明示，别再把「听完 5 章」实现成「再读 5 整章」。
+- **实时缓存的「快速重试」必须保持可选且默认关闭（10114 确立）**：`AppConfig.ttsCacheFastRetry` 默认 **false**——关闭时必须是原来那套保守行为（只有从派发起算的单段超时、无干涸判据）；开启后单段超时固定 `FAST_RETRY_SEGMENT_TIMEOUT_SECONDS = 30` + 队列干涸 `REALTIME_DRY_STALL_GRACE_SECONDS = 15` 判定引擎挂死并走 `handleSpeakError(retryWithReinit = true)`。三条不可改回的点：① `armRealtimeDryWatchdog` 入口必须有 `if (!AppConfig.ttsCacheFastRetry) return`；② `realtimeDryIndex` 去重必须保留（同一单元重复武装会因 `retryParagraphKey` 二次命中而**直接跳段**）；③ 撤销点 `playWavFile()` / `pauseReadAloud()` / `resetWavPlayback()` 缺一不可；④ 看门狗必须用 `AppConfig.ttsRealtimeSegmentTimeoutSeconds`，不得改回直接读 `ttsCacheSegmentTimeoutSeconds`。回归锁 `ReadAloudRealtimeDryWatchdogTest` 6 项。
+  - ⚠️ 上游真相（排查同类卡顿时先用）：卡住往往是**语音引擎自己崩了**——`logcat -b crash` 里 `org.Multi_TTS` 的 `Fatal signal 6 (SIGABRT) … Abort message: 'Pointer tag for … was truncated'`，backtrace 落在 `libBDSpeechDecoder_V1.so`（百度 SDK tagged-pointer 缺陷），崩溃时刻与「派发后无声」完全对齐；legado 只能缩短恢复时间，根治靠换引擎。
+  - ⚠️ 日志通道（2026-11-01 修正旧误判）：**`AppLog` 会以 tag `Legado` 写 logcat**（`I/Legado (pid): AppLog …`），release 包也能 `adb logcat -d | grep Legado` 读到，不必等用户开「记录日志」。
 - **禁止缓存 `viewTreeObserver` 局部引用后自行移除监听（10101 确立，主线程崩溃级）**：`View.getViewTreeObserver()` 在 View **尚未 attach** 时返回的是 View 内部的临时 `mFloatingTreeObserver`；attach 时 `View.dispatchAttachedToWindow` 调 `info.mTreeObserver.merge(mFloatingTreeObserver)` 把监听**搬进真实 observer 并 `kill()` 掉这份临时对象**（`mAlive=false`）。监听仍会被派发，但回调里对**缓存的旧引用**调 `removeOnGlobalLayoutListener` / `removeOnPreDrawListener` 会先过 `checkIsAlive()` → `IllegalStateException: This ViewTreeObserver is not alive`，主线程 FATAL。
   - 正确写法三选一：① 每次从 View 现取（`view.viewTreeObserver.add/remove`）；② 移除前查 `isAlive()`（本仓库范例 `AnimationExtensions.doAfterFirstDraw`）；③ 直接用 androidx `doOnLayout` / `doOnPreDraw`（`OneShotPreDrawListener` 内部已含 `isAlive()` 回退，且 detach 时自动移除）。
   - ⚠️ **在 `onCreate` / `onViewCreated` 里注册布局回调是最高危场景**：此时控件必然未 attach。10024 的「朗读面板定位就绪才显示」重放时踩中此坑，10095~10100 期间「听书状态重进阅读页」必崩。
@@ -389,11 +392,21 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10114` 递增**。
+> **下一次交付 versionCode 从 `10115` 递增**。
 
 ---
 
-- ✅ **10113（`3.26.110109c`）—— 当前交付，未发布**（听书章中静音的真因：暂停被跨线程吞掉 → 真的停声 + 合成重试 + 明示）：
+- ✅ **10114（`3.26.110118c`）—— 当前交付，未发布**（实时缓存新增可选「快速重试」：队列干涸 15s 判引擎挂死 + 单段超时 30s）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `5c1834ee`。
+  - **起因（作者，2026-11-01 17:43）**：改用「MultiTTS 作为系统 TTS 引擎 + 实时缓存」听书时卡住——界面显示仍在播放、无暂停无终止，约 67 秒后自己接着读。
+  - **真因（logcat `Legado` tag 的 AppLog 实锤）**：`17:44:17.857 [TTS缓存] 实时缓存合成超时(90s) 单元:54` → `tts realtime synthesize timeout, retry current paragraph` → `initTts engine:org.Multi_TTS`（系统侧 `Unbinding TTS engine … Reason: client disconnection request`）→ 重派发后 `17:44:18.231` 合成完成恢复。**崩溃对上时刻**：`11-01 17:42:48.243 Fatal signal 6 (SIGABRT) … (org.Multi_TTS)`，`Abort message: 'Pointer tag for 0x2200790065006b was truncated'`，backtrace 在 `/data/app/…/lib/arm64/libBDSpeechDecoder_V1.so (Java_com_baidu_speechsynthesizer_utility_SpeechDecoder_decodeWithCallback)` + `libc free`；线程名 `s.baidu.com/...`。⇒ **MultiTTS 内的百度合成 SDK 合成中 SIGABRT 崩溃，把这次 `synthesizeToFile` 请求带走了**（onDone/onError 都不来），已合成段播到 `17:43:10` 枯竭后无声 67 秒，直到看门狗到点。同日崩溃时刻：`09:32:03`、`10:02:38`、`11:33:42`、`17:42:48`；10-31 夜 `23:25:49`、`23:42:49`、`23:56:14`、`23:56:25`（后两次正对上 10113 那次焦点放弃 `23:56:32`）。
+  - **改动**：① `AppConfig` 新增开关 `ttsCacheFastRetry`（默认 **false**＝完全保持原保守行为）+ `FAST_RETRY_SEGMENT_TIMEOUT_SECONDS = 30` + `ttsRealtimeSegmentTimeoutSeconds`（开启时固定 30s，否则回落用户设置值）；② `TTSReadAloudService` 新增 `REALTIME_DRY_STALL_GRACE_SECONDS = 15` 与 `armRealtimeDryWatchdog(index)` / `cancelRealtimeDryWatchdog()`：`speakRealtimeUnit()` 入口武装，15s 后若 `index == nowSpeak && isRun && !pause && !wavPlayer.isPlaying` 则 `TtsCacheLog.put("实时缓存队列干涸(15s)未出声，按引擎挂死重试 单元:$index")` + `handleSpeakError("tts realtime dry timeout", retryWithReinit = true)`（复用既有 `clearTTS()+initTts()` 解卡链）；撤销点 `playWavFile()`/`pauseReadAloud()`/`resetWavPlayback()`；③ 设置项 `pref_config_tts_cache.xml` 的 `SwitchPreference`（`defaultValue=false`）+ 中英文案（summary 明说「需要语音引擎合成较快、慢速在线引擎请关闭」）；④ `TtsCacheConfigDialog.upSegmentTimeoutSummary()` 在快速重试开启时改显「实际按 30 秒生效」。
+  - ⚠️ **红线**：开关默认必须是 `false`（关闭＝单段超时仍走用户设置值、无干涸判据）；干涸看门狗**同一单元只武装一次**（`realtimeDryIndex` 去重），否则二次重试会直接跳段；**三个撤销点缺一不可**；看门狗必须用 `AppConfig.ttsRealtimeSegmentTimeoutSeconds`，不得改回直接读 `ttsCacheSegmentTimeoutSeconds`。回归锁 `ReadAloudRealtimeDryWatchdogTest` 6 项（已变异证伪：删开关判定 ⇒ `dryWatchdogOnlyArmedInFastRetryMode` RED；删 `playWavFile` 的撤销 ⇒ `dryWatchdogIsPerUnitAndCancelledWherePlaybackStarts` RED）。
+  - **验证**：全量单测 **334 项 / 10 失败**（＝10113 基线 328/10 ＋ 新增 6 项全绿；10 项仍为既有 `CacheTaskStoreTest` 9 项 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`）。正式编译两包成功；平板覆盖 10113→10114，两包 `firstInstallTime` 均未变（`c`=`2026-10-30 14:00:50`、`sk2`=`2026-10-31 18:28:26`），启动后 `MainActivity` 为焦点应用、`crash` buffer 无 18 时段 FATAL。⚠️ **干涸判据的真机行为未复现验证**（需 MultiTTS 再次崩溃），属静态 + 变异验证；开关默认关闭，不改默认行为。
+  - **未做 / 外部因素**：MultiTTS 百度 SDK 崩溃是**第三方缺陷**，legado 侧只能缩短恢复时间；建议作者在 MultiTTS 里换掉百度系引擎（Edge/微软/火山）或升级 MultiTTS。
+  - **产物**：正式版 36,187,422 B ＋ 共存版 36,187,220 B；均 `10114` / `3.26.110118c` / arm64-v8a / apksigner 退出码 0。已在 `release/`（`legado-sk-arm64-v8a.apk` 固定名 + 两个版本名；10111/10112/10113 未发布版本仍保留，待作者定是否清理）。
+
+- ✅ **10113（`3.26.110109c`）—— 历史交付，未发布**（听书章中静音的真因：暂停被跨线程吞掉 → 真的停声 + 合成重试 + 明示）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `3784df4a`。
   - **起因**：10112 只守住了「定时额度」，没治「章中静默中断」本身。本次定位到真因：`HttpReadAloudService.pauseReadAloud()` 先调 `super.pauseReadAloud()`（内部 `abandonFocus()` 已放弃音频焦点），再 `kotlin.runCatching { playIndexJob?.cancel(); exoPlayer.pause() }`；而合成失败回调跑在 `BaseService.execute` 默认的 `Dispatchers.IO`（`app/src/main/java/io/legado/app/base/BaseService.kt:33-40`），ExoPlayer 却绑定主线程（`HttpReadAloudService.kt:93` `ExoPlayer.Builder(this)` 默认 `applicationLooper`）⇒ 跨线程 `pause()` 抛 `IllegalStateException: Player is accessed on the wrong thread` 并被 `runCatching` **吞掉** ⇒ **焦点已弃、声音继续，缓冲播完即章中静音**，服务与通知仍在、额度未用完。
   - **现场指纹（平板 `HA1KAPWG`，10-31 夜）**：`dumpsys audio` 播放事件 `23:55:19.782 state:started → 23:58:22.974 state:stopped → 23:58:23.441 releasing player`，**全程无 `state:paused`**；焦点 abandon 在 `23:56:32`（同一 `HttpReadAloudService@f2b05b8` 活到 `11-01 06:39:46` 才第二次 abandon）⇒ 焦点先弃、声音后停 = 暂停被吞。
@@ -413,20 +426,6 @@ uiautomator2 / ADB
   - ⚠️ **已知边界**：`chapterAdvancedAloud()` 只看位置是否前进，用户主动 seek 也算「已推进」⇒ 这类换章仍扣一章（保守，未改变原行为）；「脱离显示视角切章」是异步 `execute(IO)`，失败只留日志与停止，无法回滚额度。**未做**（另立事项）：段落合成失败重试、`advanceScriptQueue()` 队列空续播、`LogModule.READ_ALOUD` 默认勾选、无播放事件看门狗 —— 即「治中断本身」仍需下一版。
   - **验证**：全量单测 **325 项 / 10 失败**（＝10111 基线 322/10 ＋ 新增 3 项全绿；10 项为既有 `CacheTaskStoreTest` 9 项 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`）。正式编译 `assembleAppRelease` + `assembleAppSk2` 成功；平板 `HA1KAPWG` 覆盖安装 10111→10112，`firstInstallTime` 仍 `2026-10-30 14:00:50`（升级非重装），`crash` buffer FATAL 0；APK 内 `aapt dump --values resources` 已含「听完 %d 章（含本章）」「正在朗读（含本章还剩 %d 章）」。⚠️ **听书定时功能的真机行为回归（完整听完 N 章）尚未做**，需作者实听或下一轮复现验证。
   - **产物**：正式版 36,183,566 B ＋ 共存版 36,183,630 B；均 `10112` / `3.26.110108c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（固定名 + 两个版本名，共 3 个 10112 文件；10111 两个包按作者指示**保留**，因其从未发布 Release）。
-
-- ✅ **10111（`3.26.103113c`）—— 历史交付，未发布**（缩短书架变动自动备份的去抖窗口 8s→3s）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `21f17b4c`。（同日先试过 2 秒的 10110，作者反馈「太极端」后定为 3 秒；10110 产物已删、未发不发。）
-  - **需求（作者）**：加/删书后**立刻退出 App**，这次自动备份就丢了，问「要等多久」。事实：`Backup.autoBackupOnShelfChangeIfNeeded` 先 `delay(SHELF_CHANGE_DEBOUNCE_MS)` 再备份，且 `LocalConfig.lastShelfKeys` **只在成功后记账、启动时不补账** ⇒ 去抖窗口内杀进程＝永久丢（下次再加/删书才顺带补上）。作者定调：去抖 **3~3.5 秒**，加上传后总共 ~5~6 秒完成。
-  - **改动**：`Backup.kt` `SHELF_CHANGE_DEBOUNCE_MS` 8_000L → **3_000L**（一处常量 + KDoc 说明区间与下调理由）。去抖机制保留（批量增删只备份一次），`mutex` + 拿锁后复查键集合的现有防重复逻辑未动。
-  - ⚠️ **红线**：去抖不得调回 8 秒，也不得低于 3 秒（再短会把连续操作拆成多次 WebDAV 上传）。也**不要**以为缩短就消除了丢备份窗口——3 秒内杀进程仍会丢，根治需「启动时对账 `lastShelfKeys`」（作者本次未选）。回归锁 `AutoBackupOnShelfChangeGuardTest.shelfChangeDebounceStaysShort`（≤3500ms，已双向证伪：改回 8_000L ⇒ RED）。
-  - **验证**：全量单测 **322 项 / 10 失败**（＝10109 基线 321/10 ＋ 新增 1 项全绿）。
-  - **真机实测（平板 `HA1KAPWG`，10109→10111 覆盖，两包 `firstInstallTime` 均未变）**：判据＝`/sdcard/bookyuedu/backup.zip` 的 `stat` size/mtime，用主机 `date +%s` 计相对时间（**设备时钟与主机不同步，别跨设备算差**）。
-    - 加书（详情页「放入书架」）→ **+5 秒** zip 一次写到位 773,882 B；删书（详情页删除 → 「是」）→ **+7 秒** 772,606 B（采样每轮含 uiautomator dump ≈+1s 开销，实际更快）。⇒ 温态「点击到备份包写完 ≈5~6 秒」成立。
-    - ⚠️ **冷态明显更慢**：刚装完/刚启动后的头一两次，zip 是**逐步长大**的（加书：57,344→389,120→773,880 共约 16 秒；删书：49,152→772,606 共约 21 秒）。`dumpsys cpuinfo` 显示全程 CPU 仅 1.5%~12%，瓶颈不是压缩算力而是 IO/DB 冷缓存。⇒ 「总共 5~6 秒」只在热态成立，别当成恒定值。
-    - 备份内容核对：zip 17 条目、解压 2.87 MB（`config.xml` 620,362 B、`agent.zip` 85,172 B 等），**不含** `cookie.json`/`loginCache.json`（作者「登录状态」项未勾选，慢的不是 11 MB 登录缓存序列化）；`bookshelf.json` 55 本、加的那本在内、删的那本已消失；`crash` buffer FATAL 0。
-    - ⚠️ **WebDAV 上传在 zip 写完才开始**（`Backup.backup()` 顺序：写 JSON → `ZipUtils.zipFiles` → `copyBackup` → `AppWebDav.backUpWebDav` → 删临时目录），上传耗时**未计时**（release 包读不到 `app.log`，`AppLog` 不写 logcat）。
-  - **产物**：正式版 36,182,934 B ＋ 共存版 36,183,026 B；均 `10111` / `3.26.103113c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定，10110 产物已删）。
-
 
 ## 7. 当前机器环境与配套文档（2026-09-04 迁移后）
 
