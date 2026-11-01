@@ -284,6 +284,7 @@ Activity 页面标题和正文标题不是“弹窗头”，不得为追求无�
   2. `AppWebDav.getProgressFileName` 保持 `书名_作者.json` 双参无 mediaType 后缀；
   3. `ReadBookActivity` / `ReadMangaActivity.onPause` 自动同步禁止加 `BuildConfig.DEBUG` 限制。
 - **听书翻页竞态守卫（10023 起为新架构）**：朗读跟随体系采用上游「两原语 + 纯函数跟随规则 + 派生脱节」（10017/10018 的 `pageTurnAnimating` / `TTS_PROGRESS` 存储式守卫已被 `shouldFollowAloudAdvance` 单调性规则整体替代，`readAloudPageDetached`/地板闩已删除）。防拽页由「显示页==朗读出发页且位置前进才跟随」单一规则保证，翻页由 UI 侧观察者单点执行，引擎只发布位置绝不直写 `durChapterPos`。移植上游时不得回退到旧的存储式 detach / 跟随地板方案，不得让引擎重新直写显示进度。
+- **在线朗读的「暂停」必须真的停声（10113 确立）**：`HttpReadAloudService.pauseReadAloud()` / `resumeReadAloud()` 对 ExoPlayer 的操作必须 `lifecycleScope.launch { }` 在主线程执行，**禁止用 `runCatching` 包裹**。原因：`super.pauseReadAloud()` 内部已 `abandonFocus()` 放弃音频焦点，而合成失败回调跑在 `BaseService.execute` 默认的 `Dispatchers.IO`；异常一旦被吞，表现就是「焦点已弃、声音继续 → 缓冲播完章中静音」，服务与通知仍在、章节定时额度也没用完（2026-10-31 夜间实机事故）。合成失败必须走 `prepareScriptMediaItemsWithRetry()`（3 次、间隔 1.2s）并在最终失败时 `AppLog`(`LogModule.READ_ALOUD`) + toast 明示；一次失败即静默暂停属回归。回归锁 `ReadAloudPauseOnMainThreadGuardTest` 3 项。
 - **原版共享偏好 key**：`BookCover.kt` 的 `legadoCoverRuleConfig` 是原版遗留 key，不能改名。
 - **品牌与更新**：不做交流群（QQ 入口全删）；更新检查与仓库链接全部指向 `skxingyu/legado-sk`（`UpdateManager.GITHUB_API`、关于页 README 直连 `raw.githubusercontent.com/skxingyu/legado-sk/main/README.md`）；「更新设置」只存在于关于页，无启动自动检查。
 - **内置书源与其授权守卫：10059 起永久移除，不要恢复**（2026-09-21 作者指示）。不得再引入 `defaultData/bookSources.json`、`DefaultData.builtinBookSources` / `seedBuiltinBookSourcesOnce()`、`LocalConfig.builtinBookSourceSeeded`、`JsExtensions.matchApp()` / `getAppName()` / `getAppPackageName()`、`AppInfo.packageName` / `appName`。回归锁 `BuiltinSourceRemovedTest`（已双向证伪）会在恢复时失败。⚠️ 通用接口 `getAppVersionName()` / `getAppVersionCode()` / `getAppVariant()` 与平台 API `appCtx.packageName` **不受影响，勿顺手删**。存量装机已播种的那条书源**保留不动**（无法区分系统播种与用户自建，主动删会误删用户数据）。
@@ -388,11 +389,22 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10113` 递增**。
+> **下一次交付 versionCode 从 `10114` 递增**。
 
 ---
 
-- ✅ **10112（`3.26.110108c`）—— 当前交付，未发布**（听书「按章节定时」不再白掉额度，并暴露跨章失败）：
+- ✅ **10113（`3.26.110109c`）—— 当前交付，未发布**（听书章中静音的真因：暂停被跨线程吞掉 → 真的停声 + 合成重试 + 明示）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `3784df4a`。
+  - **起因**：10112 只守住了「定时额度」，没治「章中静默中断」本身。本次定位到真因：`HttpReadAloudService.pauseReadAloud()` 先调 `super.pauseReadAloud()`（内部 `abandonFocus()` 已放弃音频焦点），再 `kotlin.runCatching { playIndexJob?.cancel(); exoPlayer.pause() }`；而合成失败回调跑在 `BaseService.execute` 默认的 `Dispatchers.IO`（`app/src/main/java/io/legado/app/base/BaseService.kt:33-40`），ExoPlayer 却绑定主线程（`HttpReadAloudService.kt:93` `ExoPlayer.Builder(this)` 默认 `applicationLooper`）⇒ 跨线程 `pause()` 抛 `IllegalStateException: Player is accessed on the wrong thread` 并被 `runCatching` **吞掉** ⇒ **焦点已弃、声音继续，缓冲播完即章中静音**，服务与通知仍在、额度未用完。
+  - **现场指纹（平板 `HA1KAPWG`，10-31 夜）**：`dumpsys audio` 播放事件 `23:55:19.782 state:started → 23:58:22.974 state:stopped → 23:58:23.441 releasing player`，**全程无 `state:paused`**；焦点 abandon 在 `23:56:32`（同一 `HttpReadAloudService@f2b05b8` 活到 `11-01 06:39:46` 才第二次 abandon）⇒ 焦点先弃、声音后停 = 暂停被吞。
+  - **排除项（有据）**：`dumpsys deviceidle whitelist` 含 `org.Multi_TTS`(10476) 与 `io.legado.app.c`(10486)，`am get-standby-bucket` 两者均 **5(EXEMPTED)** ⇒ **省电「优化」与 MultiTTS 冻结都不是本因**（MultiTTS `ForwardService` 全程 `isForeground=true`）。
+  - **改动**：① `pauseReadAloud()` / `resumeReadAloud()` 的播放器操作改为 `lifecycleScope.launch { … }` 在主线程执行并**删除 `runCatching`**；② 新增 `prepareScriptMediaItemsWithRetry()`（`SCRIPT_SYNTHESIS_ATTEMPTS = 3`、间隔 `SCRIPT_SYNTHESIS_RETRY_DELAY_MS = 1200L`），最终失败写 `AppLog`(`LogModule.READ_ALOUD`) + `toastOnUi(getString(R.string.read_aloud_synthesis_failed, index + 1))` + `pauseReadAloud()`；③ 新文案 `read_aloud_synthesis_failed`（中/英）。
+  - ⚠️ **红线**：这两个方法里不得再用 `runCatching` 包 `exoPlayer.*`，也不得绕过 `lifecycleScope.launch` 直接调用（同文件 `InputStreamDataSource` 回调在播放线程，属同类跨线程隐患）。回归锁 `ReadAloudPauseOnMainThreadGuardTest` 3 项（已变异证伪：改回 `kotlin.runCatching` ⇒ `pauseTouchesPlayerOnMainThreadWithoutSwallowing` RED）。
+  - **验证**：全量单测 **328 项 / 10 失败**（＝10112 基线 325/10 ＋ 新增 3 项全绿；10 项仍为既有 `CacheTaskStoreTest` 9 项 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`）。正式编译两包成功；平板覆盖 10112→10113，两包 `firstInstallTime` 均未变（`c`=`2026-10-30 14:00:50`、`sk2`=`2026-10-31 18:28:26`），启动后 `topResumedActivity=MainActivity`、`crash` buffer **FATAL 0**。⚠️ **合成失败路径本身未在真机复现**（需 MultiTTS 端制造超时），属静态 + 变异验证。
+  - **未做**：「队列播完但未到章尾」的续播（`advanceScriptQueue()` 空队列场景）、`LogModule.READ_ALOUD` 默认勾选、无播放事件看门狗。
+  - **产物**：正式版 36,185,440 B ＋ 共存版 36,185,416 B；均 `10113` / `3.26.110109c` / arm64-v8a / apksigner 退出码 0。已在 `release/`（10111、10112 两个未发布版本按作者指示保留）。
+
+- ✅ **10112（`3.26.110108c`）—— 历史交付，未发布**（听书「按章节定时」不再白掉额度，并暴露跨章失败）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `7fb58cf9`。
   - **起因（作者，2026-11-01）**：10-31 夜间用正式版听书（内置脚本引擎＝MultiTTS 转发器，走 `HttpReadAloudService`），章中设「听完 5 章」，实际约 3 章多就无声，**停在定时后第 3 章中后部、该章没读完**。
   - **定性证据（平板 `HA1KAPWG`）**：`cache/logs/` 12 个文件全 0 字节（当时未开「记录日志」）；`batterystats` uid 10486 `audio=35m15s`、`AudioMix` 31m56s/13 次；`dumpsys audio` 显示 23:30–23:58:22 连续播放后 `releasing player`，整夜再无音频、无 `state:paused`、进程活到 06:39（未崩溃）；快手 23:22:59 释放焦点后开播。⇒ **非定时到点**（定时只可能停在章尾），属章中静默中断。完整记录见 `test-records/read-aloud-chapter-timer-interrupt-2026-11-01.md`。
@@ -415,19 +427,6 @@ uiautomator2 / ADB
     - ⚠️ **WebDAV 上传在 zip 写完才开始**（`Backup.backup()` 顺序：写 JSON → `ZipUtils.zipFiles` → `copyBackup` → `AppWebDav.backUpWebDav` → 删临时目录），上传耗时**未计时**（release 包读不到 `app.log`，`AppLog` 不写 logcat）。
   - **产物**：正式版 36,182,934 B ＋ 共存版 36,183,026 B；均 `10111` / `3.26.103113c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定，10110 产物已删）。
 
-- ✅ **10109（`3.26.103100c`）—— 历史交付，未发布**（修复：试读后「加书架」不触发书架变动自动备份）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `8a2e5530`。
-  - **根因**：`BookInfoViewModel.saveBookAtChapter` 先把书以 `BookType.notShelf` 落库（同一 `bookUrl`）；用户在阅读页退出弹窗 / 目录页「缓存范围」/ 漫画 / 视频里加架时，原代码只做 `removeType(BookType.notShelf)` + `Book.save()` ⇒ 走 `save()` 的 **update 分支，10075 起就没有任何触发点** ⇒ 备份不跑。删书一直正常是因为 `Book.delete()` 无条件触发。
-  - **「有时能」的真相**：同一退出路径上还有 `Backup.autoBack(this)`（`ReadBookActivity.onDestroy`，24 小时闸门），偶尔撞上就看起来「备份过了」。
-  - **修法**：新增唯一入口 `Book.addToShelf()`（`data/entities/Book.kt`）= `removeType(BookType.notShelf)` + `save()` + `Backup.autoBackupOnShelfChangeIfNeeded(appCtx)`；四处入口（`ReadBookActivity`、`BaseReadBookActivity`、`ReadMangaActivity`、`VideoPlayerActivity`）改调它。
-  - ⚠️ **红线**：这四处不得再各自写 `removeType(BookType.notShelf)` + `save()`；也不得把触发行搬进 `Book.save()` 的两个出口——`save()` 被朗读每章（`SourceAudioReadAloudService`）与本地导入循环（`LocalBook`）高频调用，每次全表扫 `bookDao.all`。回归锁 `AutoBackupOnShelfChangeGuardTest` 13 项（已双向证伪：摘掉触发行 / 退回旧写法均变红）。
-  - **验证**：全量单测 **321 项 / 10 失败**（＝基线 320/10 ＋ 新增 1 项全绿；10 项为既有 `CacheTaskStoreTest` 9 项 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`）。⚠️ **模拟器不可用**：本机雷电 adb 完全连不上——仅 `Ld9BoxHeadless.exe` 监听 `2222`（手工发 adb `CNXN` 无回应，非 adbd），无 5554/5555；quitall 冷启 3 次、`adb start-server` 后启动、整栈重启（含 kill `Ld9BoxSVC.exe`）均无效，`adb devices` 恒空。**改在真机平板 `HA1KAPWG` 回归（2026-10-31）**：
-    - 覆盖安装 10108→10109，两个包 `firstInstallTime` 均未变（`c`=`2026-10-30 14:00:50`、`sk2`=`2026-09-21 13:08:56`）；备份目录 `/sdcard/bookyuedu`（`仅保留最新备份` 开 ⇒ 文件名固定 `backup.zip`），此时「书架变动时自动备份」开关实际为**关**（首轮加书无备份正是这个原因，**排查时先看开关**）。
-    - 打开开关后逐路径实测，判据＝`/sdcard/bookyuedu/backup.zip` 的 `stat` mtime 精确到秒 + 拉包比对 `bookshelf.json`：**发现页**试读→退出弹窗「确定」(09:42:39/09:51:17)、**搜索**（搜索结果→选源→详情页）「放入书架」(09:46:43) 与试读后退出「确定」(09:51:17)、**详情页**「放入书架」(09:44:05)、**删书**（详情页删除 09:44:35、书架多选删除 09:52:16）全部触发；zip 内 `bookshelf.json` 含新书、删除后回落。`crash` buffer **FATAL 0**。
-    - ⚠️ **幂等跳过实测**：把库里已有「同名+同作者+同 mediaType」的书再加一次（`无限神职`/`忘记穿马甲`，搜索来源「含遇見」）时 zip **不更新**——`ShelfIdentity` 键集合未变，属设计行为（日志有「书架身份键集合未变化」分支）。
-    - ⚠️ **但同一次操作观察到书架出现第 2 条同名同作者记录**，且「合并重复书籍」能识别为「1 组重复共 2 本」⇒ 该次加书走了 `savePlain` 插入而非 `BookUpsert` 合并，**与本次改动无关，尚未定位**（下次动 `BookUpsert`/`BookMergeRules` 前先查：候选查询为何未命中）。
-    - ⚠️ 每次自动备份都会同时上传 WebDAV（作者用坚果云），实测 6 次 ≈ 4.7 MB，**回归时不要反复加删书**。
-  - **产物**：正式版 36,182,925 B ＋ 共存版 36,182,999 B；均 `10109` / `3.26.103100c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
 
 ## 7. 当前机器环境与配套文档（2026-09-04 迁移后）
 
