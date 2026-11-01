@@ -295,7 +295,7 @@ Activity 页面标题和正文标题不是“弹窗头”，不得为追求无�
   - **作者选择方案 A「不动存量」**：旧名目录存在即跳过，**既不新建也不改名**；存量设备继续显示旧名，只有全新安装才显示新名。
   - ⚠️ **`白`/`黑` 预设 `backgroundImgPath` 本来就是 `None`（纯色预设），`bg=None` 不是空壳判据**；判别空壳要看 `primaryColor` 是否为预设真值（`#ffecebe9`/`#ff333333`），带背景的是 `MD3·墨墟`/`MD3·琴女`（`background.jpg`）。
 
-- **听书按章节定时的额度守卫（10112 起）**：额度只在「引擎自然读完本章且本章真的推出过音频」时消耗——判定必须走顶层纯函数 `decideChapterConsumption(syncView, timeChapter, chapterAdvanced)`（10115 抽出，便于直接断言行为），**不得退回无条件递减**；`chapterAdvancedAloud()` 必须保持 `open`，书源音频由 `SourceAudioReadAloudService` 按播放进度重写（10115 修复「永不消耗」回归）；跨章推进失败必须 `timeChapter++` 归还并重新派发 `READ_ALOUD_DS_CHAPTER`，失败点不得再写裸 `stopSelf()`。回归锁 `ReadAloudChapterTimerGuardTest`。⚠️ 语义事实：档位把**当前章算第 1 章**，已由文案「含本章」明示，别再把「听完 5 章」实现成「再读 5 整章」。
+- **听书按章节定时的额度守卫（10112 起）**：额度只在「引擎自然读完本章且本章真的推出过音频」时消耗——判定必须走顶层纯函数 `decideChapterConsumption(syncView, timeChapter, chapterAdvanced)`（10115 抽出，便于直接断言行为），**不得退回无条件递减**；`chapterAdvancedAloud()` 必须保持 `open`，书源音频由 `SourceAudioReadAloudService` 按播放进度重写（10115 修复「永不消耗」回归，10116 抽成纯函数 `audioChapterAdvanced()`）；**任何「额度已扣才发现无法继续」的失败路径都必须给 `stopReadAloudOnInvalidPosition` 传 `refundChapter = true, toast = true`**，子类有自有推进基准的必须重写 `onChapterConsumed()` 复位（10116）；跨章推进失败必须 `timeChapter++` 归还并重新派发 `READ_ALOUD_DS_CHAPTER`，失败点不得再写裸 `stopSelf()`。回归锁 `ReadAloudChapterTimerGuardTest`。⚠️ 语义事实：档位把**当前章算第 1 章**，已由文案「含本章」明示，别再把「听完 5 章」实现成「再读 5 整章」。
 - **实时缓存的「快速重试」必须保持可选且默认关闭（10114 确立）**：`AppConfig.ttsCacheFastRetry` 默认 **false**——关闭时必须是原来那套保守行为（只有从派发起算的单段超时、无干涸判据）；开启后单段超时固定 `FAST_RETRY_SEGMENT_TIMEOUT_SECONDS = 30` + 队列干涸 `REALTIME_DRY_STALL_GRACE_SECONDS = 15` 判定引擎挂死并走 `handleSpeakError(retryWithReinit = true)`。三条不可改回的点：① `armRealtimeDryWatchdog` 入口必须有 `if (!AppConfig.ttsCacheFastRetry) return`；② `realtimeDryIndex` 去重必须保留（同一单元重复武装会因 `retryParagraphKey` 二次命中而**直接跳段**）；③ 撤销点 `playWavFile()` / `pauseReadAloud()` / `resetWavPlayback()` 缺一不可；④ 看门狗必须用 `AppConfig.ttsRealtimeSegmentTimeoutSeconds`，不得改回直接读 `ttsCacheSegmentTimeoutSeconds`。回归锁 `ReadAloudRealtimeDryWatchdogTest` 6 项。
   - ⚠️ 上游真相（排查同类卡顿时先用）：卡住往往是**语音引擎自己崩了**——`logcat -b crash` 里 `org.Multi_TTS` 的 `Fatal signal 6 (SIGABRT) … Abort message: 'Pointer tag for … was truncated'`，backtrace 落在 `libBDSpeechDecoder_V1.so`（百度 SDK tagged-pointer 缺陷），崩溃时刻与「派发后无声」完全对齐；legado 只能缩短恢复时间，根治靠换引擎。
   - ⚠️ 日志通道（2026-11-01 修正旧误判）：**`AppLog` 会以 tag `Legado` 写 logcat**（`I/Legado (pid): AppLog …`），release 包也能 `adb logcat -d | grep Legado` 读到，不必等用户开「记录日志」。
@@ -392,11 +392,23 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10116` 递增**。
+> **下一次交付 versionCode 从 `10117` 递增**。
 
 ---
 
-- ✅ **10115（`3.26.112008c`）—— 当前交付，未发布**（审查整改：修 P1 书源音频「章节定时永不消耗」+ 6 项缺陷）：
+- ✅ **10116（`3.26.112023c`）—— 当前交付，未发布**（审查闭环：切章失败归还额度+提示、书源音频判据纯函数化、防双扣收口）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `7721d729`。
+  - **起因**：10115 交付后作者要求「做一次 review，给优化建议」。独立审查（`reviewer`，`del_mvxsn3wa_x201`）确认 10115 的 7 项修复中 6 项成立，但指出两处未闭合；作者选择全修。
+  - **① 切章失败只从「静默 return」变成「静默停止」**：`stopReadAloudOnInvalidPosition(message)` 只 `putDebug` + `stopSelf()`，而切章走 `execute(IO)` 异步，`advanceToNextChapter()` 早已返回 true ⇒ 额度已扣、无音频、无提示，用户以为崩了。改：该函数加 `refundChapter: Boolean = false, toast: Boolean = false`，`switchReadAloudChapterKeepingView` 的 `prepareReadAloudChapter` 失败传 `refundChapter = true, toast = true`（归还 `timeChapter++` + 重发 `READ_ALOUD_DS_CHAPTER` + 刷新通知 + `AppLog.put(..., toast = true)`）。
+  - **② `chapterStartNumber = readAloudNumber` 对书源音频的防双扣无效**：音频判据只看 `chapterPlaybackStart`/`maxPlayedPosition`，而这俩只在 `play()` 复位；片尾提前切章（`closeCredits`）与 `STATE_ENDED` 两次 `nextChapter()` 落在新章 `play()` 之前时仍会重复扣一章。改：基类新增 `protected open fun onChapterConsumed() = Unit`，在 `nextChapter()` 消费成立处（`chapterStartNumber = readAloudNumber` 之后）调用；`SourceAudioReadAloudService` 覆写为把两个字段置 -1。
+  - **③ 音频判据纯函数化 + 补行为测试**：抽出顶层 `internal const val AUDIO_CHAPTER_ADVANCE_MIN_MS = 1_000` 与 `internal fun audioChapterAdvanced(startMs: Int, maxPlayedMs: Int, minMs: Int = AUDIO_CHAPTER_ADVANCE_MIN_MS): Boolean = startMs >= 0 && maxPlayedMs - startMs >= minMs`，`chapterAdvancedAloud()` 改为 `super… || audioChapterAdvanced(chapterPlaybackStart, maxPlayedPosition)`。原测试是源码文本断言，把阈值改成 `1_000_000`（等于回到「永不消耗」）仍会绿 ⇒ 新增 `audioChapterAdvanceFollowsRealBehaviour` 真行为断言（已变异证伪：阈值改 `2_000` ⇒ RED）。
+  - **④ 顺手**：`clearTTS()` 注明「干涸看门狗由 `resetWavPlayback()` 撤销」（审查建议的「收口到 `clearTTS`」经核对**已被传递覆盖**，不需要再加一行，重复调用无收益）；修 `onRealtimeSynthesisTimeout()` 一行挤两条语句的排版残迹。
+  - ⚠️ **红线**：① 任何「消耗额度后才发现无法继续」的新失败路径都必须给 `stopReadAloudOnInvalidPosition` 传 `refundChapter = true, toast = true`；② 子类若用自有推进基准（如书源音频的播放进度），**必须重写 `onChapterConsumed()` 复位它**，否则同章连判会双扣；③ `audioChapterAdvanced()` 的默认阈值必须仍是 1000ms（改大等于回到「永不消耗」，行为测试会挡）。
+  - **验证**：全量单测 **337 项 / 10 失败**（＝10115 基线 336/10 ＋ 新增 1 项全绿；10 项仍为既有 `CacheTaskStoreTest` 9 项 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`）；`assembleAppRelease` + `assembleAppSk2` 成功，两包 `10116` / `3.26.112023c` / `aapt` 包名正确 / `apksigner` 退出码 0。⚠️ **真机未安装**：平板 `HA1KAPWG` 仍从 adb 掉线（`adb devices` 为空），10115/10116 两版均未做覆盖安装回归。
+  - **产物**：正式版 36,189,277 B ＋ 共存版 36,189,247 B；已在 `release/`（固定名 + 两个版本名）。10111–10115 五个未发布版本的包仍在，待作者定是否清理。
+  - **仍未做**：`LogModule.READ_ALOUD` 默认勾选（「保存日志」可能仍拿不到证据）、`advanceScriptQueue()` 队列空续播、`isRun && !pause` 无播放事件看门狗；5 处内联 `index == nowSpeak && isRun && !pause` 未收口到 `shouldTreatAsDry`（那几处 `playerPlaying` 无意义，收口只会塞凑数参数）。
+
+- ✅ **10115（`3.26.112008c`）—— 历史交付，未发布**（审查整改：修 P1 书源音频「章节定时永不消耗」+ 6 项缺陷）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `310ebe23`。
   - **起因**：10114 交付后用户要求「审查代码质量、给优化建议」。独立审查（`reviewer`，`del_mvxrhg13_ct85`）在修 P1/P2 的改动里发现 1 项真回归 + 6 项 P2；作者选择全部修（`p1_p2`）。
   - **P1（真回归，10112 引入）**：`SourceAudioReadAloudService` 的 `readAloudNumber` 只在字幕时间映射可用时才前进（`syncTextPosition` 前置 `layoutBinding?.layoutParagraphAt(position) ?: return`，而 `bindMappingToLayout()` 在无时间映射/正文未就绪时返回 null），且该服务 `sessionChapterCanStartWithoutText = true` ⇒ `chapterStartNumber` 恒 0、`readAloudNumber` 恒 0 ⇒ `chapterAdvancedAloud()` 恒 false ⇒ **书源音频的章节定时永不扣额度（永不停止）**。修法：基类 `chapterAdvancedAloud()` 改 `protected open`，该服务改为 `super.chapterAdvancedAloud() || (chapterPlaybackStart >= 0 && maxPlayedPosition - chapterPlaybackStart >= AUDIO_CHAPTER_ADVANCE_MIN_MS)`（本章播过 1 秒即算推出过音频），并在 `play()` 记录起点、进度循环里更新 `maxPlayedPosition`。
@@ -417,17 +429,6 @@ uiautomator2 / ADB
   - **验证**：全量单测 **334 项 / 10 失败**（＝10113 基线 328/10 ＋ 新增 6 项全绿；10 项仍为既有 `CacheTaskStoreTest` 9 项 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`）。正式编译两包成功；平板覆盖 10113→10114，两包 `firstInstallTime` 均未变（`c`=`2026-10-30 14:00:50`、`sk2`=`2026-10-31 18:28:26`），启动后 `MainActivity` 为焦点应用、`crash` buffer 无 18 时段 FATAL。⚠️ **干涸判据的真机行为未复现验证**（需 MultiTTS 再次崩溃），属静态 + 变异验证；开关默认关闭，不改默认行为。
   - **未做 / 外部因素**：MultiTTS 百度 SDK 崩溃是**第三方缺陷**，legado 侧只能缩短恢复时间；建议作者在 MultiTTS 里换掉百度系引擎（Edge/微软/火山）或升级 MultiTTS。
   - **产物**：正式版 36,187,422 B ＋ 共存版 36,187,220 B；均 `10114` / `3.26.110118c` / arm64-v8a / apksigner 退出码 0。已在 `release/`（`legado-sk-arm64-v8a.apk` 固定名 + 两个版本名；10111/10112/10113 未发布版本仍保留，待作者定是否清理）。
-
-- ✅ **10113（`3.26.110109c`）—— 历史交付，未发布**（听书章中静音的真因：暂停被跨线程吞掉 → 真的停声 + 合成重试 + 明示）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `3784df4a`。
-  - **起因**：10112 只守住了「定时额度」，没治「章中静默中断」本身。本次定位到真因：`HttpReadAloudService.pauseReadAloud()` 先调 `super.pauseReadAloud()`（内部 `abandonFocus()` 已放弃音频焦点），再 `kotlin.runCatching { playIndexJob?.cancel(); exoPlayer.pause() }`；而合成失败回调跑在 `BaseService.execute` 默认的 `Dispatchers.IO`（`app/src/main/java/io/legado/app/base/BaseService.kt:33-40`），ExoPlayer 却绑定主线程（`HttpReadAloudService.kt:93` `ExoPlayer.Builder(this)` 默认 `applicationLooper`）⇒ 跨线程 `pause()` 抛 `IllegalStateException: Player is accessed on the wrong thread` 并被 `runCatching` **吞掉** ⇒ **焦点已弃、声音继续，缓冲播完即章中静音**，服务与通知仍在、额度未用完。
-  - **现场指纹（平板 `HA1KAPWG`，10-31 夜）**：`dumpsys audio` 播放事件 `23:55:19.782 state:started → 23:58:22.974 state:stopped → 23:58:23.441 releasing player`，**全程无 `state:paused`**；焦点 abandon 在 `23:56:32`（同一 `HttpReadAloudService@f2b05b8` 活到 `11-01 06:39:46` 才第二次 abandon）⇒ 焦点先弃、声音后停 = 暂停被吞。
-  - **排除项（有据）**：`dumpsys deviceidle whitelist` 含 `org.Multi_TTS`(10476) 与 `io.legado.app.c`(10486)，`am get-standby-bucket` 两者均 **5(EXEMPTED)** ⇒ **省电「优化」与 MultiTTS 冻结都不是本因**（MultiTTS `ForwardService` 全程 `isForeground=true`）。
-  - **改动**：① `pauseReadAloud()` / `resumeReadAloud()` 的播放器操作改为 `lifecycleScope.launch { … }` 在主线程执行并**删除 `runCatching`**；② 新增 `prepareScriptMediaItemsWithRetry()`（`SCRIPT_SYNTHESIS_ATTEMPTS = 3`、间隔 `SCRIPT_SYNTHESIS_RETRY_DELAY_MS = 1200L`），最终失败写 `AppLog`(`LogModule.READ_ALOUD`) + `toastOnUi(getString(R.string.read_aloud_synthesis_failed, index + 1))` + `pauseReadAloud()`；③ 新文案 `read_aloud_synthesis_failed`（中/英）。
-  - ⚠️ **红线**：这两个方法里不得再用 `runCatching` 包 `exoPlayer.*`，也不得绕过 `lifecycleScope.launch` 直接调用（同文件 `InputStreamDataSource` 回调在播放线程，属同类跨线程隐患）。回归锁 `ReadAloudPauseOnMainThreadGuardTest` 3 项（已变异证伪：改回 `kotlin.runCatching` ⇒ `pauseTouchesPlayerOnMainThreadWithoutSwallowing` RED）。
-  - **验证**：全量单测 **328 项 / 10 失败**（＝10112 基线 325/10 ＋ 新增 3 项全绿；10 项仍为既有 `CacheTaskStoreTest` 9 项 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`）。正式编译两包成功；平板覆盖 10112→10113，两包 `firstInstallTime` 均未变（`c`=`2026-10-30 14:00:50`、`sk2`=`2026-10-31 18:28:26`），启动后 `topResumedActivity=MainActivity`、`crash` buffer **FATAL 0**。⚠️ **合成失败路径本身未在真机复现**（需 MultiTTS 端制造超时），属静态 + 变异验证。
-  - **未做**：「队列播完但未到章尾」的续播（`advanceScriptQueue()` 空队列场景）、`LogModule.READ_ALOUD` 默认勾选、无播放事件看门狗。
-  - **产物**：正式版 36,185,440 B ＋ 共存版 36,185,416 B；均 `10113` / `3.26.110109c` / arm64-v8a / apksigner 退出码 0。已在 `release/`（10111、10112 两个未发布版本按作者指示保留）。
 
 ## 7. 当前机器环境与配套文档（2026-09-04 迁移后）
 
