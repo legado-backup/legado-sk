@@ -145,6 +145,9 @@
     <string name="tts_cache_prefetch_count_value">当前段之后预合成 %1$d 段</string>
     <string name="tts_cache_segment_timeout">单段合成超时</string>
     <string name="tts_cache_segment_timeout_value">看门狗超时 %1$d 秒：引擎卡死的段会被清理，不会永久阻塞播放</string>
+    <string name="tts_cache_fast_retry">快速重试（合成卡住自动恢复）</string>
+    <string name="tts_cache_fast_retry_summary">开启后：单段超时固定按 30 秒，且播放队列干涸 15 秒仍未出声就判定引擎卡住并自动重试。需要语音引擎合成较快；用慢速在线引擎请保持关闭，只靠单段超时兜底。</string>
+    <string name="tts_cache_segment_timeout_value_fast_retry">快速重试开启中，实际按 %1$d 秒生效；关闭快速重试后恢复上方设置值</string>
     <string name="tts_cache_http_thread_count">在线 TTS 线程数</string>
     <string name="tts_cache_http_thread_count_value">%1$d 线程，仅批量缓存且引擎为在线(HTTP) TTS 时生效；系统引擎与实时缓存不受影响</string>
     <string name="tts_cache_settings">TTS缓存设置</string>

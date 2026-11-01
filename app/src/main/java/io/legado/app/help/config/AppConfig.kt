@@ -1807,6 +1807,21 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
         }
 
     /**
+     * 实时朗读快速重试：合成挂死时更快恢复——单段超时固定按 30 秒，
+     * 且播放队列干涸 15 秒仍未出声即判定引擎挂死并重建客户端重试。
+     * 仅适用于合成较快的引擎；慢速在线引擎保持关闭，只靠单段超时兜底。
+     */
+    val ttsCacheFastRetry
+        get() = appCtx.getPrefBoolean(PreferKey.ttsCacheFastRetry, false)
+
+    /** 实时朗读看门狗实际使用的单段超时：快速重试开启时固定 30 秒。 */
+    val ttsRealtimeSegmentTimeoutSeconds: Int
+        get() = if (ttsCacheFastRetry) FAST_RETRY_SEGMENT_TIMEOUT_SECONDS else ttsCacheSegmentTimeoutSeconds
+
+    /** 快速重试模式下实时朗读的单段合成超时（秒）。 */
+    const val FAST_RETRY_SEGMENT_TIMEOUT_SECONDS = 30
+
+    /**
      * 批量 TTS 缓存在线(HTTP)引擎的单元并发合成线程数；仅作用于 TEXT+TTS 下载
      * 缓存的 HTTP 引擎分支，系统 TTS 引擎串行合成不适用，实时缓存不适用。
      */

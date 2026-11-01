@@ -45,6 +45,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+/**
+ * 快速重试模式下「播放队列干涸」的等待秒数：当前段还在合成、播放器已无音频，
+ * 超过该时长仍未出声即判定引擎把这次请求吞了（见 [TTSReadAloudService.armRealtimeDryWatchdog]）。
+ */
+private const val REALTIME_DRY_STALL_GRACE_SECONDS = 15
+
 class TTSReadAloudService : BaseReadAloudService() {
 
     private var textToSpeech: TextToSpeech? = null
@@ -115,6 +121,10 @@ class TTSReadAloudService : BaseReadAloudService() {
     )
 
     private val realtimePending = linkedMapOf<Int, RealtimeSynthesis>()
+
+    /** 队列干涸看门狗已武装的单元；-1 表示未武装。同一单元只武装一次，避免重复重试造成跳段。 */
+    private var realtimeDryIndex = -1
+    private var realtimeDryWatchdog: Runnable? = null
 
     private fun clearRealtimePending() {
         synchronized(realtimePending) {
@@ -251,6 +261,7 @@ class TTSReadAloudService : BaseReadAloudService() {
 
     /** 停止/废弃播放现场：清播放器、轮询、在途与就绪的合成产物。 */
     private fun resetWavPlayback() {
+        cancelRealtimeDryWatchdog()
         wavPosJob?.cancel()
         wavPosJob = null
         if (wavPlayer.isCommandAvailable(androidx.media3.common.Player.COMMAND_STOP)) {
@@ -325,6 +336,7 @@ class TTSReadAloudService : BaseReadAloudService() {
      * 已知代价是引擎忙碌时当前段要等手头的合成做完（引擎串行，无法插队）。
      */
     private fun speakRealtimeUnit(index: Int, text: String) {
+        armRealtimeDryWatchdog(index)
         val book = ReadBook.book ?: return
         val chapter = textChapter?.chapter ?: return
         val key = TtsCacheStore.buildUnitKey(book, chapter, text, ttsVoiceName)
@@ -420,7 +432,7 @@ class TTSReadAloudService : BaseReadAloudService() {
         } else {
             predictHandler.postDelayed(
                 watchdog,
-                AppConfig.ttsCacheSegmentTimeoutSeconds * 1000L,
+                AppConfig.ttsRealtimeSegmentTimeoutSeconds * 1000L,
             )
             TtsCacheLog.debug("实时缓存合成派发 单元:$index 在途:${realtimePending.size}")
         }
@@ -431,12 +443,43 @@ class TTSReadAloudService : BaseReadAloudService() {
         val record = synchronized(realtimePending) { realtimePending.remove(index) } ?: return
         record.tempFile.delete()
         TtsCacheLog.put(
-            "实时缓存合成超时(${AppConfig.ttsCacheSegmentTimeoutSeconds}s) 单元:$index"
+            "实时缓存合成超时(${AppConfig.ttsRealtimeSegmentTimeoutSeconds}s) 单元:$index"
         )
         if (index == nowSpeak && isRun && !pause) {
             handleSpeakError("tts realtime synthesize timeout", retryWithReinit = true)
         }
         // 预取段超时通常意味着引擎已挂死：当前段的看门狗随后也会触发并重init
+    }
+
+    /**
+     * 武装「播放队列干涸」看门狗：实时缓存下当前段要等引擎合成，若播放器已空转、
+     * 该段迟迟不出声，说明这次请求要么被引擎吞掉、要么引擎还在忙别的段——
+     * 单段超时从派发起算（默认 90 秒）会白等很久，这里从「该出声音了」起算。
+     * 仅快速重试开启时生效，慢速引擎保持原有保守行为（只靠单段超时兜底）。
+     */
+    private fun armRealtimeDryWatchdog(index: Int) {
+        if (!AppConfig.ttsCacheFastRetry) return
+        if (realtimeDryIndex == index) return
+        cancelRealtimeDryWatchdog()
+        realtimeDryIndex = index
+        val watchdog = Runnable {
+            realtimeDryWatchdog = null
+            realtimeDryIndex = -1
+            if (index != nowSpeak || !isRun || pause) return@Runnable
+            if (wavPlayer.isPlaying) return@Runnable
+            TtsCacheLog.put(
+                "实时缓存队列干涸(${REALTIME_DRY_STALL_GRACE_SECONDS}s)未出声，按引擎挂死重试 单元:$index"
+            )
+            handleSpeakError("tts realtime dry timeout", retryWithReinit = true)
+        }
+        realtimeDryWatchdog = watchdog
+        predictHandler.postDelayed(watchdog, REALTIME_DRY_STALL_GRACE_SECONDS * 1000L)
+    }
+
+    private fun cancelRealtimeDryWatchdog() {
+        realtimeDryWatchdog?.let { predictHandler.removeCallbacks(it) }
+        realtimeDryWatchdog = null
+        realtimeDryIndex = -1
     }
 
     /** 合成完成：提交进缓存；当前单元直接播，预取单元落库等翻句时命中。 */
@@ -555,6 +598,7 @@ class TTSReadAloudService : BaseReadAloudService() {
             if (!AppConfig.ttsRealtimeCache) file?.delete()
             return
         }
+        cancelRealtimeDryWatchdog()
         if (file == null || !file.exists() || file.length() <= 0L) {
             file?.delete()
             handleSpeakError("tts wav file invalid", retryWithReinit = false)
@@ -963,6 +1007,7 @@ class TTSReadAloudService : BaseReadAloudService() {
 
     override fun pauseReadAloud(abandonFocus: Boolean) {
         super.pauseReadAloud(abandonFocus)
+        cancelRealtimeDryWatchdog()
         activeUtteranceId = null
         queuedUntilIndex = -1
         speakGeneration++

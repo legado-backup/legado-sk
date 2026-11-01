@@ -52,6 +52,8 @@ object PreferKey {
     const val ttsCachePrefetchCount = "ttsCachePrefetchCount"
     // 实时缓存单段合成超时秒数（引擎挂死看门狗）
     const val ttsCacheSegmentTimeoutSeconds = "ttsCacheSegmentTimeoutSeconds"
+    // 实时朗读快速重试（单段超时固定 30s + 队列干涸 15s 即重试，需引擎合成较快）
+    const val ttsCacheFastRetry = "ttsCacheFastRetry"
     // 批量缓存在线(HTTP) TTS 引擎的单元并发合成线程数
     const val ttsCacheHttpThreadCount = "ttsCacheHttpThreadCount"
     // TTS 缓存命中 key 可选维度（引擎+章节+文本固定必选）：语速 / 音色

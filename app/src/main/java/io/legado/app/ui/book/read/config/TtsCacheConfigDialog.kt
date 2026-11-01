@@ -107,10 +107,17 @@ class TtsCacheConfigDialog : BasePrefDialogFragment() {
 
         private fun upSegmentTimeoutSummary() {
             findPreference<Preference>(PreferKey.ttsCacheSegmentTimeoutSeconds)?.summary =
-                getString(
-                    R.string.tts_cache_segment_timeout_value,
-                    AppConfig.ttsCacheSegmentTimeoutSeconds
-                )
+                if (AppConfig.ttsCacheFastRetry) {
+                    getString(
+                        R.string.tts_cache_segment_timeout_value_fast_retry,
+                        AppConfig.FAST_RETRY_SEGMENT_TIMEOUT_SECONDS
+                    )
+                } else {
+                    getString(
+                        R.string.tts_cache_segment_timeout_value,
+                        AppConfig.ttsCacheSegmentTimeoutSeconds
+                    )
+                }
         }
 
         private fun showHttpThreadCountDialog() {

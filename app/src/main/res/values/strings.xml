@@ -146,6 +146,9 @@
     <string name="tts_cache_prefetch_count_value">Pre-synthesize %1$d segments after the current one</string>
     <string name="tts_cache_segment_timeout">Per-segment synthesis timeout</string>
     <string name="tts_cache_segment_timeout_value">Watchdog timeout: %1$d s. A stuck engine segment is cleaned up instead of blocking playback forever.</string>
+    <string name="tts_cache_fast_retry">Fast retry (auto recover stalled synthesis)</string>
+    <string name="tts_cache_fast_retry_summary">When on: per-segment timeout is fixed at 30 s, and 15 s of silence while the playback queue is dry counts as a stalled engine and retries automatically. Requires a fast synthesizer; keep it off for slow online engines.</string>
+    <string name="tts_cache_segment_timeout_value_fast_retry">Fast retry is on: %1$d s is used instead; turning it off restores the value above</string>
     <string name="tts_cache_http_thread_count">Online TTS threads</string>
     <string name="tts_cache_http_thread_count_value">%1$d threads, only for batch caching with an online (HTTP) TTS engine. System engines and realtime cache are not affected.</string>
     <string name="tts_cache_settings">TTS cache settings</string>
