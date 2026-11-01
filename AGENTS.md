@@ -294,6 +294,7 @@ Activity 页面标题和正文标题不是“弹窗头”，不得为追求无�
   - **作者选择方案 A「不动存量」**：旧名目录存在即跳过，**既不新建也不改名**；存量设备继续显示旧名，只有全新安装才显示新名。
   - ⚠️ **`白`/`黑` 预设 `backgroundImgPath` 本来就是 `None`（纯色预设），`bg=None` 不是空壳判据**；判别空壳要看 `primaryColor` 是否为预设真值（`#ffecebe9`/`#ff333333`），带背景的是 `MD3·墨墟`/`MD3·琴女`（`background.jpg`）。
 
+- **听书按章节定时的额度守卫（10112 起）**：额度只在「引擎自然读完本章且本章真的推出过音频」时消耗——判定式必须保持 `!syncView && timeChapter > 0 && chapterAdvancedAloud()`，**不得退回无条件递减**；跨章推进失败必须 `timeChapter++` 归还并重新派发 `READ_ALOUD_DS_CHAPTER`，失败点不得再写裸 `stopSelf()`。回归锁 `ReadAloudChapterTimerGuardTest`。⚠️ 语义事实：档位把**当前章算第 1 章**，已由文案「含本章」明示，别再把「听完 5 章」实现成「再读 5 整章」。
 - **禁止缓存 `viewTreeObserver` 局部引用后自行移除监听（10101 确立，主线程崩溃级）**：`View.getViewTreeObserver()` 在 View **尚未 attach** 时返回的是 View 内部的临时 `mFloatingTreeObserver`；attach 时 `View.dispatchAttachedToWindow` 调 `info.mTreeObserver.merge(mFloatingTreeObserver)` 把监听**搬进真实 observer 并 `kill()` 掉这份临时对象**（`mAlive=false`）。监听仍会被派发，但回调里对**缓存的旧引用**调 `removeOnGlobalLayoutListener` / `removeOnPreDrawListener` 会先过 `checkIsAlive()` → `IllegalStateException: This ViewTreeObserver is not alive`，主线程 FATAL。
   - 正确写法三选一：① 每次从 View 现取（`view.viewTreeObserver.add/remove`）；② 移除前查 `isAlive()`（本仓库范例 `AnimationExtensions.doAfterFirstDraw`）；③ 直接用 androidx `doOnLayout` / `doOnPreDraw`（`OneShotPreDrawListener` 内部已含 `isAlive()` 回退，且 detach 时自动移除）。
   - ⚠️ **在 `onCreate` / `onViewCreated` 里注册布局回调是最高危场景**：此时控件必然未 attach。10024 的「朗读面板定位就绪才显示」重放时踩中此坑，10095~10100 期间「听书状态重进阅读页」必崩。
@@ -387,11 +388,21 @@ uiautomator2 / ADB
 > - ⚠️ **它的 versionCode 区间（10066–10072）不作为递增基线**，因为该分支未合并回 main。
 > - 若作者明确点名该分支并要求在其上工作，那是**本次对话的一次性例外**，做完仍回到「默认 main」。
 >
-> **下一次交付 versionCode 从 `10112` 递增**。
+> **下一次交付 versionCode 从 `10113` 递增**。
 
 ---
 
-- ✅ **10111（`3.26.103113c`）—— 当前交付，未发布**（缩短书架变动自动备份的去抖窗口 8s→3s）：
+- ✅ **10112（`3.26.110108c`）—— 当前交付，未发布**（听书「按章节定时」不再白掉额度，并暴露跨章失败）：
+  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `7fb58cf9`。
+  - **起因（作者，2026-11-01）**：10-31 夜间用正式版听书（内置脚本引擎＝MultiTTS 转发器，走 `HttpReadAloudService`），章中设「听完 5 章」，实际约 3 章多就无声，**停在定时后第 3 章中后部、该章没读完**。
+  - **定性证据（平板 `HA1KAPWG`）**：`cache/logs/` 12 个文件全 0 字节（当时未开「记录日志」）；`batterystats` uid 10486 `audio=35m15s`、`AudioMix` 31m56s/13 次；`dumpsys audio` 显示 23:30–23:58:22 连续播放后 `releasing player`，整夜再无音频、无 `state:paused`、进程活到 06:39（未崩溃）；快手 23:22:59 释放焦点后开播。⇒ **非定时到点**（定时只可能停在章尾），属章中静默中断。完整记录见 `test-records/read-aloud-chapter-timer-interrupt-2026-11-01.md`。
+  - **改动（A/B/C 三项）**：① 文案明确含当前章（`timer_chapter_m`、`read_aloud_timer_chapter`，中英各一处）；② `advanceToNextChapter()` 改为返回 `Boolean`，失败时 `timeChapter++` 归还刚消耗额度 + `AppLog.put(..., toast = true)`，并把两处裸 `stopSelf()` 与脱离视角切章越界改为 `stopReadAloudOnInvalidPosition()`（留原因）；③ 新增 `chapterStartNumber`（`prepareReadAloudChapter` 记录本章播放起点）与 `chapterAdvancedAloud() = readAloudNumber > chapterStartNumber`，空章/朗读列表为空的换章**不扣额度**。
+  - ⚠️ **红线**：递减必须仍在 `consumesChapter` 分支内（`!syncView && timeChapter > 0 && chapterAdvancedAloud()`），不得退回无条件递减；失败归还必须与 `READ_ALOUD_DS_CHAPTER` 重新派发成对；`advanceToNextChapter` 的失败分支不得再写裸 `stopSelf()`。回归锁 `ReadAloudChapterTimerGuardTest` 13 项（新增/改写 3 项，已双向证伪：去掉 `chapterAdvancedAloud()` / `timeChapter++` / `chapterStartNumber = ...` 三个变异体 ⇒ 对应 3 项全 RED）。
+  - ⚠️ **已知边界**：`chapterAdvancedAloud()` 只看位置是否前进，用户主动 seek 也算「已推进」⇒ 这类换章仍扣一章（保守，未改变原行为）；「脱离显示视角切章」是异步 `execute(IO)`，失败只留日志与停止，无法回滚额度。**未做**（另立事项）：段落合成失败重试、`advanceScriptQueue()` 队列空续播、`LogModule.READ_ALOUD` 默认勾选、无播放事件看门狗 —— 即「治中断本身」仍需下一版。
+  - **验证**：全量单测 **325 项 / 10 失败**（＝10111 基线 322/10 ＋ 新增 3 项全绿；10 项为既有 `CacheTaskStoreTest` 9 项 + `ReadBookConfigTest.sanitize_clampsUnsafeLineSpacing`）。正式编译 `assembleAppRelease` + `assembleAppSk2` 成功；平板 `HA1KAPWG` 覆盖安装 10111→10112，`firstInstallTime` 仍 `2026-10-30 14:00:50`（升级非重装），`crash` buffer FATAL 0；APK 内 `aapt dump --values resources` 已含「听完 %d 章（含本章）」「正在朗读（含本章还剩 %d 章）」。⚠️ **听书定时功能的真机行为回归（完整听完 N 章）尚未做**，需作者实听或下一轮复现验证。
+  - **产物**：正式版 36,183,566 B ＋ 共存版 36,183,630 B；均 `10112` / `3.26.110108c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（固定名 + 两个版本名，共 3 个 10112 文件；10111 两个包按作者指示**保留**，因其从未发布 Release）。
+
+- ✅ **10111（`3.26.103113c`）—— 历史交付，未发布**（缩短书架变动自动备份的去抖窗口 8s→3s）：
   - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `21f17b4c`。（同日先试过 2 秒的 10110，作者反馈「太极端」后定为 3 秒；10110 产物已删、未发不发。）
   - **需求（作者）**：加/删书后**立刻退出 App**，这次自动备份就丢了，问「要等多久」。事实：`Backup.autoBackupOnShelfChangeIfNeeded` 先 `delay(SHELF_CHANGE_DEBOUNCE_MS)` 再备份，且 `LocalConfig.lastShelfKeys` **只在成功后记账、启动时不补账** ⇒ 去抖窗口内杀进程＝永久丢（下次再加/删书才顺带补上）。作者定调：去抖 **3~3.5 秒**，加上传后总共 ~5~6 秒完成。
   - **改动**：`Backup.kt` `SHELF_CHANGE_DEBOUNCE_MS` 8_000L → **3_000L**（一处常量 + KDoc 说明区间与下调理由）。去抖机制保留（批量增删只备份一次），`mutex` + 拿锁后复查键集合的现有防重复逻辑未动。
@@ -417,19 +428,6 @@ uiautomator2 / ADB
     - ⚠️ **但同一次操作观察到书架出现第 2 条同名同作者记录**，且「合并重复书籍」能识别为「1 组重复共 2 本」⇒ 该次加书走了 `savePlain` 插入而非 `BookUpsert` 合并，**与本次改动无关，尚未定位**（下次动 `BookUpsert`/`BookMergeRules` 前先查：候选查询为何未命中）。
     - ⚠️ 每次自动备份都会同时上传 WebDAV（作者用坚果云），实测 6 次 ≈ 4.7 MB，**回归时不要反复加删书**。
   - **产物**：正式版 36,182,925 B ＋ 共存版 36,182,999 B；均 `10109` / `3.26.103100c` / 阅读SK / arm64-v8a / apksigner 退出码 0。已在 `release/`（3 文件约定）。
-
-- ✅ **10108（`3.26.103013c`）—— 历史交付，未发布**（备份/恢复纳入书源登录状态，供正式版与共存版互通）：
-  - 分支 **main**。**无 DB 迁移**（版本仍 117）。提交 `dd7c31e5`。
-  - ⚠️ **这是作者自用的数据搬迁能力，不对外宣传**（作者 2026-10-30 指示）：**不写进发布说明、不提新功能、不发 Release**；只为让正式版接手共存版的存量数据（自 2026-10-30 起作者**主用正式版 `io.legado.app.c`**，共存版降为备用/并行验证）。维护时只保证「备份→恢复」链路不回归，不要把这项当成对外功能去包装。
-  - **需求**：`io.legado.app.c` 与 `io.legado.app.sk2` 数据完全隔离，换包要重登每个书源。作者选择「只补登录态」方案，通道 WebDAV + 公共目录，**手动两步**（一方备份、另一方恢复），不做启动自动同步。
-  - **缺口事实**：登录态不在任何 json 里 —— 在 `cookies` 表（按二级域名）与 `caches` 表的五类前缀 `loginHeader_`/`userInfo_`/`sourceVariable_`/`v_`/`infoMap_`。
-  - **改动**：`Backup.kt` 新增 `cookie.json`（`appDb.cookieDao.all()`）与 `loginCache.json`（`appDb.cacheDao.sourceState()`）**并加入 `backupFileNames`**；`Restore.restoreDbData` 事务内消费二者并清内存旧值；`BackupItems` 新增 `loginState` 项目（`isSelected` 默认 true ⇒ 存量设备自动勾选）；`CookieDao.all()` / `CacheDao.sourceState()` 两个新 DAO 方法。
-  - ⚠️ **红线**：三处必须成对——**落盘 + 进 `backupFileNames` + 恢复消费**。只落盘不进清单会被 `existingZipSources` 静默过滤（文件永远不进 zip）；只恢复不清内存会被 LRU 旧值遮蔽。回归锁 `LoginStateBackupTest` 4 项（已双向证伪），源码级断言须在 `app/build.gradle` 声明 `loginStateBackupGuardSources`。
-  - ⚠️ **已知边界**：`userInfo_*` 用设备 `ANDROID_ID` 前 16 字节 AES 加密 ⇒ **同设备两包可互解，跨设备解不开**；导入的本地书文件本体不在备份内；同步是手动两步。
-  - **验证**：全量单测 **320 项 / 10 失败**（＝旧基线 316/10 ＋ 新增 4 项全绿）。模拟器（`emulator-5554`，正式版 10098→10108、共存版 10107→10108，两个 `firstInstallTime` 均未变）：共存版备份 → logcat `cookie.json 列表大小 2 / 写入 185`、`loginCache.json 列表大小 6 / 写入 868`，zip 内两文件真实（2 条 gitee cookie + 6 条 `userInfo_httpTts:*`/`v_番茄_fq_*`）；正式版恢复 → 选择恢复项目出现「登录状态（书源 Cookie、登录信息、源变量）1 KB」→ 恢复后两表行**逐字一致**（root 拉库核对），书源就位、书架无重复、FATAL 0；「默认备份内容」10 个 checkable 全 `checked=true`。
-  - **真机实测（平板 `HA1KAPWG`，2026-10-30）**：共存版备份 → logcat `cookie.json 列表大小 29 / 写入 606833`、`loginCache.json 列表大小 664 / 写入 11126304`，产物 zip 仅 1.0 MB（`/sdcard/bookyuedu/backup.zip`，1,079,162 B；内含书架 54 本、书源 11 条，登录缓存按前缀分布 `v_` 650 条 11.05 MB / `sourceVariable_` 6 / `userInfo_` 6 / `loginHeader_` 2）；正式版设同一备份目录并长按「恢复」→ 选择恢复项目出现「登录状态 … 11.2 MB」→ 恢复日志 `cookie.json 列表大小 29`、`loginCache.json 列表大小 664`，书架出现 54 本、书源 11 条、`crash` FATAL 0；恢复后正式版的「发现→番茄」能正常拉到内容 ⇒ 搬过来的源变量可用。⚠️ 同一个平板实测到**神魔小说源 `shenmoxs.top` 已 ECONNREFUSED**（既有失效源，与本改动无关，别误当回归）。⚠️ 正式版首次选目录需存储权限，`adb shell appops set io.legado.app.c MANAGE_EXTERNAL_STORAGE allow` 可代劳（等于用户手动授权）。
-  - **产物**：正式版 36,183,363 B ＋ 共存版 36,183,504 B；均 `10108` / `3.26.103013c` / 阅读SK / arm64-v8a / apksigner 0。已在 `release/`（3 文件约定）。
-
 
 ## 7. 当前机器环境与配套文档（2026-09-04 迁移后）
 
